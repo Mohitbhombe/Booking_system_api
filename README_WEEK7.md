@@ -1,5 +1,4 @@
-Week 7 — API Documentation, Testing, Versioning, and Performance
-===============================================================
+# Week 7 — API Documentation, Testing, Versioning, and Performance
 
 What I implemented in Week 7:
 

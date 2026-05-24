@@ -4,10 +4,25 @@ const cors = require('cors');
 const connectDB = require('./config/database');
 const errorHandler = require('./middleware/error');
 const { stripeWebhook } = require('./controllers/paymentController');
-const swaggerUi = require('swagger-ui-express');
-const specs = require('./config/swagger');
-const rateLimit = require('express-rate-limit');
-const apicache = require('apicache');
+const helmet = require('helmet');
+const compression = require('compression');
+const morgan = require('morgan');
+const logger = require('./config/logger');
+let swaggerUi;
+let specs;
+let rateLimit;
+let apicache;
+try {
+  // Only require these optional deps when available. Avoid loading in test env to prevent timers/handles.
+  if (process.env.NODE_ENV !== 'test') {
+    swaggerUi = require('swagger-ui-express');
+    specs = require('./config/swagger');
+    rateLimit = require('express-rate-limit');
+    apicache = require('apicache');
+  }
+} catch (err) {
+  // ignore missing optional deps
+}
 
 // Connect to Database
 connectDB();
@@ -20,16 +35,33 @@ app.set('query parser', 'extended');
 // Middleware
 app.use(cors());
 
-// Basic rate limiter
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200, // limit each IP
-});
-app.use(limiter);
+// Security headers
+app.use(helmet());
 
-// Simple caching for GET responses
-const cache = apicache.middleware;
-app.use(cache('5 minutes'));
+// Compression
+app.use(compression());
+
+// Basic rate limiter and caching (skip during tests)
+if (process.env.NODE_ENV !== 'test' && rateLimit && apicache) {
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 200 // limit each IP
+  });
+  app.use(limiter);
+
+  // Simple caching for GET responses
+  const cache = apicache.middleware;
+  app.use(cache('5 minutes'));
+}
+
+// Request logging (morgan) — forward logs to winston in production
+if (process.env.NODE_ENV !== 'test') {
+  if (process.env.NODE_ENV === 'production') {
+    app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
+  } else {
+    app.use(morgan('dev'));
+  }
+}
 
 // Stripe webhook must receive raw body — mount before JSON parser
 app.post('/api/v1/payments/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
@@ -63,8 +95,10 @@ app.use('/api/v1/bookings', bookingRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/emails', emailRoutes);
 
-// Swagger UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
+// Swagger UI (only when available and not in tests)
+if (process.env.NODE_ENV !== 'test' && swaggerUi && specs) {
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
+}
 
 // 404 Route handler
 app.use((req, res, next) => {
