@@ -4,6 +4,7 @@ const Hotel = require('../models/Hotel');
 const Room = require('../models/Room');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
+const Payment = require('../models/Payment');
 
 const seedData = async () => {
   try {
@@ -17,6 +18,7 @@ const seedData = async () => {
     await Room.deleteMany();
     await User.deleteMany();
     await Booking.deleteMany();
+    await Payment.deleteMany();
     console.log('Cleaned up previous records successfully.');
 
     // Seed Users

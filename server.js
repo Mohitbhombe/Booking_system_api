@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/database');
 const errorHandler = require('./middleware/error');
+const { stripeWebhook } = require('./controllers/paymentController');
 
 // Connect to Database
 connectDB();
@@ -14,6 +15,10 @@ app.set('query parser', 'extended');
 
 // Middleware
 app.use(cors());
+
+// Stripe webhook must receive raw body — mount before JSON parser
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -30,10 +35,12 @@ app.get('/api/health', (req, res) => {
 const hotelRoutes = require('./routes/hotelRoutes');
 const roomRoutes = require('./routes/roomRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 app.use('/api/hotels', hotelRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // 404 Route handler
 app.use((req, res, next) => {

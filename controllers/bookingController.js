@@ -9,6 +9,7 @@ const {
   checkRoomAvailability,
   calculateTotalPrice
 } = require('../utils/roomAvailability');
+const { processRefundForBooking } = require('../utils/paymentService');
 
 /**
  * Core booking creation logic. Uses an optional MongoDB session when
@@ -191,6 +192,16 @@ exports.cancelBooking = async (req, res, next) => {
       throw new ValidationError('Booking is already cancelled');
     }
 
+    let refundResult = null;
+    try {
+      refundResult = await processRefundForBooking(booking._id);
+    } catch (refundError) {
+      if (refundError.isOperational) {
+        throw refundError;
+      }
+      console.error('Refund failed during cancellation:', refundError.message);
+    }
+
     booking.status = 'cancelled';
     await booking.save();
 
@@ -201,7 +212,15 @@ exports.cancelBooking = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: 'Booking cancelled successfully',
+      message: refundResult
+        ? 'Booking cancelled and refund processed successfully'
+        : 'Booking cancelled successfully',
+      refund: refundResult
+        ? {
+            amount: refundResult.refund.amount / 100,
+            status: refundResult.refund.status
+          }
+        : null,
       data: populatedBooking
     });
   } catch (error) {
