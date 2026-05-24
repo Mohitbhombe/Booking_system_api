@@ -8,6 +8,7 @@ const {
   handlePaymentSuccess,
   handlePaymentFailure
 } = require('../utils/paymentService');
+const { ForbiddenError } = require('../utils/errors');
 
 // @desc    Create Stripe payment intent for a booking
 // @route   POST /api/payments/create-intent
@@ -36,6 +37,14 @@ exports.createPaymentIntent = async (req, res, next) => {
 
     if (booking.status === 'confirmed') {
       throw new ConflictError('Booking is already confirmed and paid');
+    }
+
+    if (
+      req.user.role !== 'admin' &&
+      booking.user._id?.toString() !== req.user._id.toString() &&
+      booking.user.toString() !== req.user._id.toString()
+    ) {
+      throw new ForbiddenError('Not authorized to pay for this booking');
     }
 
     const existingPayment = await Payment.findOne({ booking: bookingId });
@@ -162,6 +171,14 @@ exports.getPaymentById = async (req, res, next) => {
       throw new NotFoundError(`Payment not found with ID of ${req.params.id}`);
     }
 
+    const bookingUserId = payment.booking?.user?.toString() || payment.booking?.user;
+    if (
+      req.user.role !== 'admin' &&
+      bookingUserId !== req.user._id.toString()
+    ) {
+      throw new ForbiddenError('Not authorized to view this payment');
+    }
+
     res.status(200).json({
       success: true,
       data: payment
@@ -186,6 +203,13 @@ exports.getPaymentByBooking = async (req, res, next) => {
 
     if (!payment) {
       throw new NotFoundError(`No payment found for booking ${req.params.bookingId}`);
+    }
+
+    if (
+      req.user.role !== 'admin' &&
+      booking.user.toString() !== req.user._id.toString()
+    ) {
+      throw new ForbiddenError('Not authorized to view this payment');
     }
 
     res.status(200).json({

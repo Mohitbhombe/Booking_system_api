@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
+const protect = require('../middleware/auth');
+const authorize = require('../middleware/authorize');
 const {
   createRoom,
   getAllRooms,
@@ -9,16 +11,17 @@ const {
 } = require('../controllers/roomController');
 const { checkAvailability } = require('../controllers/bookingController');
 
+// Public read routes
 router.route('/:roomId/availability')
   .get(checkAvailability);
 
 router.route('/')
   .get(getAllRooms)
-  .post(createRoom);
+  .post(protect, authorize('admin'), createRoom);
 
 router.route('/:id')
   .get(getRoomById)
-  .put(updateRoom)
-  .delete(deleteRoom);
+  .put(protect, authorize('admin'), updateRoom)
+  .delete(protect, authorize('admin'), deleteRoom);
 
 module.exports = router;

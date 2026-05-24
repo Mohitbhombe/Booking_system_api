@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const protect = require('../middleware/auth');
+const authorize = require('../middleware/authorize');
 const {
   createHotel,
   getAllHotels,
@@ -12,14 +14,14 @@ const {
 const roomRouter = require('./roomRoutes');
 router.use('/:hotelId/rooms', roomRouter);
 
-// Routes mapped to controllers
+// Public read routes
 router.route('/')
   .get(getAllHotels)
-  .post(createHotel);
+  .post(protect, authorize('admin'), createHotel);
 
 router.route('/:id')
   .get(getHotelById)
-  .put(updateHotel)
-  .delete(deleteHotel);
+  .put(protect, authorize('admin'), updateHotel)
+  .delete(protect, authorize('admin'), deleteHotel);
 
 module.exports = router;

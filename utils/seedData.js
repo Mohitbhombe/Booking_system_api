@@ -29,14 +29,14 @@ const seedData = async () => {
       {
         name: 'John Doe',
         email: 'john@example.com',
-        password: 'password123', // Will hash in Week 6
+        password: 'Password123',
         role: 'guest',
         phone: '+1-555-0199'
       },
       {
         name: 'Jane Admin',
         email: 'admin@example.com',
-        password: 'adminpassword', // Will hash in Week 6
+        password: 'AdminPass1',
         role: 'admin',
         phone: '+1-555-0100'
       }

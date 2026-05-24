@@ -4,30 +4,25 @@ Welcome to the Hotel Booking System API development repository. This is a modula
 
 ---
 
-## WEEK 5: Email Notifications with Nodemailer
+## WEEK 6: Authentication and Authorization
 
-This week adds automated HTML email notifications — booking confirmations, payment receipts, cancellation notices with refund details, and check-in reminders. Includes an email queue with retry logic and full delivery logging.
+This week implements JWT-based authentication, role-based access control (RBAC), password hashing, and protected routes across the entire API.
 
 ### Folder Structure
 ```text
 /controllers
-  ├── bookingController.js  # Triggers confirmation & cancellation emails
-  ├── paymentController.js
-  └── emailController.js    # Email log viewing & manual reminder trigger
+  └── authController.js     # Register, login, logout, profile, password reset
+/middleware
+  ├── auth.js               # JWT verification (protect)
+  └── authorize.js          # Role-based access control
 /models
-  ├── Booking.js
-  ├── Payment.js
-  └── EmailLog.js           # Tracks all sent/queued/failed emails
+  └── User.js               # Password hashing, reset token fields
 /routes
-  └── emailRoutes.js        # /api/emails/logs, /api/emails/send-reminders
+  └── authRoutes.js         # /api/auth/*
 /utils
-  ├── emailService.js       # Nodemailer transport & send helpers
-  ├── emailTemplates.js     # Professional HTML email templates
-  ├── emailQueue.js         # In-memory queue with 3-retry logic
-  ├── paymentService.js     # Triggers payment receipt email on success
-  └── reminderScheduler.js  # Daily cron: reminders 1 day before check-in
-.env.example
-server.js                   # Starts reminder scheduler on boot
+  ├── generateToken.js      # JWT signing
+  ├── passwordValidator.js  # Password strength rules
+  └── tokenBlacklist.js     # Logout token invalidation
 ```
 
 ---
@@ -35,8 +30,8 @@ server.js                   # Starts reminder scheduler on boot
 ## Setup Instructions
 
 ### 1. Prerequisites
-- Node.js (v16+), MongoDB, Stripe account (Week 4)
-- Gmail account with [App Password](https://support.google.com/accounts/answer/185833) enabled, or SendGrid/SMTP provider
+- Node.js (v16+), MongoDB
+- Completed Weeks 1–5 (Stripe, email optional)
 
 ### 2. Installation
 ```bash
@@ -44,22 +39,21 @@ npm install
 ```
 
 ### 3. Environment Setup
-Copy `.env.example` to `.env` and configure:
 ```env
 PORT=5000
 MONGODB_URI=mongodb://localhost:27017/hotel_booking
 
-# Stripe
+# JWT (required for Week 6)
+JWT_SECRET=your_super_secret_jwt_key_change_in_production
+JWT_EXPIRE=30d
+CLIENT_URL=http://localhost:3000
+
+# Stripe, Email (from previous weeks)
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-
-# Email (Gmail example)
 EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_SECURE=false
 EMAIL_USER=your@gmail.com
-EMAIL_PASS=your_gmail_app_password
-EMAIL_FROM=Hotel Booking <your@gmail.com>
+EMAIL_PASS=your_app_password
 ```
 
 ### 4. Seed & Run
@@ -68,85 +62,96 @@ npm run seed
 npm run dev
 ```
 
----
-
-## Email Triggers
-
-| Event | Email Type | When Sent |
-|-------|-----------|-----------|
-| Booking created | `booking_confirmation` | Immediately after `POST /api/bookings` |
-| Payment succeeded | `payment_receipt` | After Stripe webhook or manual confirm |
-| Booking cancelled | `cancellation` | After `PUT /api/bookings/:id/cancel` (includes refund info) |
-| Check-in tomorrow | `check_in_reminder` | Daily cron at 9:00 AM for confirmed bookings |
+**Seeded test accounts:**
+| Email | Password | Role |
+|-------|----------|------|
+| `john@example.com` | `Password123` | guest |
+| `admin@example.com` | `AdminPass1` | admin |
 
 ---
 
-## Email Templates
+## Authentication Endpoints
 
-All templates are responsive HTML with a consistent branded layout:
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| `POST` | `/api/auth/register` | Public | Register new user |
+| `POST` | `/api/auth/login` | Public | Login, returns JWT |
+| `POST` | `/api/auth/logout` | Private | Blacklist current token |
+| `GET` | `/api/auth/profile` | Private | Get logged-in user profile |
+| `PUT` | `/api/auth/update-password` | Private | Change password while logged in |
+| `POST` | `/api/auth/forgot-password` | Public | Send password reset email |
+| `PUT` | `/api/auth/reset-password/:token` | Public | Reset password with token |
 
-- **Booking Confirmation** — Pending booking details, prompts user to complete payment
-- **Payment Receipt** — Amount paid, transaction ID, confirmed booking details
-- **Cancellation** — Cancelled booking details + refund amount/status if applicable
-- **Check-in Reminder** — Hotel address, check-in time, booking summary
+### Register / Login Example
+```json
+POST /api/auth/login
+{
+  "email": "john@example.com",
+  "password": "Password123"
+}
+```
+Response includes a `token` — include it in all protected requests:
+```
+Authorization: Bearer <token>
+```
 
----
-
-## Email Queue & Logging
-
-### Queue (`utils/emailQueue.js`)
-- Emails are queued asynchronously so API responses are not blocked
-- Failed sends are retried up to **3 times** with exponential backoff (5s, 10s, 15s)
-
-### Email Log Model
-| Field | Description |
-|-------|-------------|
-| `to` | Recipient email |
-| `subject` | Email subject line |
-| `type` | `booking_confirmation`, `payment_receipt`, `cancellation`, `check_in_reminder` |
-| `booking` | Linked booking ID |
-| `status` | `queued`, `sent`, `failed` |
-| `attempts` | Number of send attempts |
-| `errorMessage` | Error details if failed |
-| `sentAt` | Timestamp when successfully delivered |
-
----
-
-## API Endpoints
-
-### Email Operations
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/emails/logs` | List all email logs (filter: `?type=`, `?status=`, `?booking=`) |
-| `GET` | `/api/emails/logs/:id` | Get single email log |
-| `POST` | `/api/emails/send-reminders` | Manually trigger tomorrow's reminders (dev only) |
-
-### Payment Operations (Week 4)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/payments/create-intent` | Create Stripe PaymentIntent |
-| `POST` | `/api/payments/webhook` | Stripe webhook handler |
-| `GET` | `/api/payments/:id` | Get payment details |
-| `POST` | `/api/payments/:id/refund` | Full or partial refund |
-| `POST` | `/api/payments/:id/confirm` | Manual confirm (dev only) |
-
-### Booking Operations (Week 3)
-- `POST /api/bookings` — Create booking (triggers confirmation email)
-- `GET /api/bookings/user/:userId` — User's bookings
-- `PUT /api/bookings/:id/cancel` — Cancel + refund + cancellation email
-- `GET /api/rooms/:roomId/availability` — Check availability
+### Password Requirements
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one number
 
 ---
 
-## Testing Emails Locally
+## Role-Based Access Control
 
-1. Configure Gmail App Password in `.env`
-2. Create a booking — check logs: `GET /api/emails/logs`
-3. Confirm payment: `POST /api/payments/:id/confirm` — triggers receipt email
-4. Cancel booking: `PUT /api/bookings/:id/cancel` — triggers cancellation email
-5. Test reminders: `POST /api/emails/send-reminders` (requires confirmed booking checking in tomorrow)
+### Public Routes (no token required)
+| Resource | Routes |
+|----------|--------|
+| System | `GET /api/health` |
+| Auth | `POST /api/auth/register`, `/login`, `/forgot-password`, `/reset-password/:token` |
+| Hotels | `GET /api/hotels`, `GET /api/hotels/:id` |
+| Rooms | `GET /api/rooms`, `GET /api/rooms/:id`, `GET /api/rooms/:roomId/availability` |
+| Stripe | `POST /api/payments/webhook` |
 
-If email is not configured, emails are logged as `failed` with a helpful error message — the API still works normally.
+### Guest Routes (authenticated)
+| Resource | Routes |
+|----------|--------|
+| Bookings | `POST /api/bookings`, `GET /api/bookings/me`, `GET /api/bookings/:id`, `PUT /api/bookings/:id/cancel` |
+| Payments | `POST /api/payments/create-intent`, `GET /api/payments/:id`, `GET /api/payments/booking/:bookingId` |
+| Profile | `GET /api/auth/profile`, `PUT /api/auth/update-password`, `POST /api/auth/logout` |
+
+### Admin-Only Routes
+| Resource | Routes |
+|----------|--------|
+| Hotels | `POST`, `PUT`, `DELETE /api/hotels` |
+| Rooms | `POST`, `PUT`, `DELETE /api/rooms` |
+| Bookings | `PUT /api/bookings/:id/status` |
+| Payments | `POST /api/payments/:id/refund` |
+| Emails | `GET /api/emails/logs`, `POST /api/emails/send-reminders` |
+
+---
+
+## Protected Booking Flow
+
+```bash
+# 1. Login
+POST /api/auth/login  →  save token
+
+# 2. Create booking (user ID taken from token automatically)
+POST /api/bookings
+Authorization: Bearer <token>
+{ "hotel": "...", "room": "...", "checkInDate": "...", "checkOutDate": "...", "guestDetails": {...} }
+
+# 3. View your bookings
+GET /api/bookings/me
+Authorization: Bearer <token>
+
+# 4. Create payment intent
+POST /api/payments/create-intent
+Authorization: Bearer <token>
+{ "bookingId": "..." }
+```
 
 ---
 
@@ -156,3 +161,4 @@ If email is not configured, emails are logged as `failed` with a helpful error m
 - **Week 2**: Room & User models, advanced queries, seeding
 - **Week 3**: Booking management, availability checks, error handling
 - **Week 4**: Stripe payment integration, webhooks, refunds
+- **Week 5**: Email notifications with Nodemailer, queue, logging

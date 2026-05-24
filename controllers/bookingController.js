@@ -11,16 +11,27 @@ const {
 } = require('../utils/roomAvailability');
 const { processRefundForBooking } = require('../utils/paymentService');
 const { sendBookingConfirmationEmail, sendCancellationEmail } = require('../utils/emailService');
+const { ForbiddenError } = require('../utils/errors');
+
+/**
+ * Verify the authenticated user owns the resource or is an admin.
+ */
+const assertOwnerOrAdmin = (req, resourceUserId) => {
+  if (req.user.role === 'admin') return;
+  if (req.user._id.toString() !== resourceUserId.toString()) {
+    throw new ForbiddenError('Not authorized to access this resource');
+  }
+};
 
 /**
  * Core booking creation logic. Uses an optional MongoDB session when
  * transactions are supported (replica set / Atlas).
  */
-const executeCreateBooking = async (body, session = null) => {
-  const { user, hotel, room, checkInDate, checkOutDate, guestDetails } = body;
+const executeCreateBooking = async (body, userId, session = null) => {
+  const { hotel, room, checkInDate, checkOutDate, guestDetails } = body;
 
-  if (!user || !hotel || !room || !checkInDate || !checkOutDate || !guestDetails) {
-    throw new ValidationError('Please provide user, hotel, room, checkInDate, checkOutDate, and guestDetails');
+  if (!hotel || !room || !checkInDate || !checkOutDate || !guestDetails) {
+    throw new ValidationError('Please provide hotel, room, checkInDate, checkOutDate, and guestDetails');
   }
 
   const dateValidation = validateBookingDates(checkInDate, checkOutDate);
@@ -31,13 +42,13 @@ const executeCreateBooking = async (body, session = null) => {
   const sessionOpt = session ? { session } : {};
 
   const [userExists, hotelExists, roomExists] = await Promise.all([
-    User.findById(user, null, sessionOpt),
+    User.findById(userId, null, sessionOpt),
     Hotel.findById(hotel, null, sessionOpt),
     Room.findById(room, null, sessionOpt)
   ]);
 
   if (!userExists) {
-    throw new NotFoundError(`User not found with ID of ${user}`);
+    throw new NotFoundError(`User not found with ID of ${userId}`);
   }
   if (!hotelExists) {
     throw new NotFoundError(`Hotel not found with ID of ${hotel}`);
@@ -68,7 +79,7 @@ const executeCreateBooking = async (body, session = null) => {
   const totalPrice = calculateTotalPrice(roomExists.pricePerNight, dateValidation.nights);
 
   const bookingData = {
-    user,
+    user: userId,
     hotel,
     room,
     checkInDate,
@@ -82,7 +93,7 @@ const executeCreateBooking = async (body, session = null) => {
     ? (await Booking.create([bookingData], { session }))[0]
     : await Booking.create(bookingData);
 
-  await User.findByIdAndUpdate(user, { $push: { bookings: booking._id } }, sessionOpt);
+  await User.findByIdAndUpdate(userId, { $push: { bookings: booking._id } }, sessionOpt);
 
   return booking;
 };
@@ -99,7 +110,7 @@ exports.createBooking = async (req, res, next) => {
       session.startTransaction();
 
       try {
-        booking = await executeCreateBooking(req.body, session);
+        booking = await executeCreateBooking(req.body, req.user._id, session);
         await session.commitTransaction();
       } catch (error) {
         await session.abortTransaction();
@@ -110,7 +121,7 @@ exports.createBooking = async (req, res, next) => {
     } catch (error) {
       // Local standalone MongoDB does not support transactions
       if (error.message && error.message.includes('replica set')) {
-        booking = await executeCreateBooking(req.body);
+        booking = await executeCreateBooking(req.body, req.user._id);
       } else {
         throw error;
       }
@@ -134,11 +145,32 @@ exports.createBooking = async (req, res, next) => {
   }
 };
 
+// @desc    Get all bookings for the logged-in user
+// @route   GET /api/bookings/me
+// @access  Private
+exports.getMyBookings = async (req, res, next) => {
+  try {
+    const bookings = await Booking.find({ user: req.user._id })
+      .populate('hotel', 'name city country address')
+      .populate('room', 'roomNumber type pricePerNight capacity')
+      .sort('-createdAt');
+
+    res.status(200).json({
+      success: true,
+      count: bookings.length,
+      data: bookings
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Get all bookings for a user
 // @route   GET /api/bookings/user/:userId
-// @access  Public (Will protect in Week 6)
+// @access  Private (own bookings or admin)
 exports.getUserBookings = async (req, res, next) => {
   try {
+    assertOwnerOrAdmin(req, req.params.userId);
     const user = await User.findById(req.params.userId);
     if (!user) {
       throw new NotFoundError(`User not found with ID of ${req.params.userId}`);
@@ -161,7 +193,7 @@ exports.getUserBookings = async (req, res, next) => {
 
 // @desc    Get single booking by ID
 // @route   GET /api/bookings/:id
-// @access  Public (Will protect in Week 6)
+// @access  Private (owner or admin)
 exports.getBookingById = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id)
@@ -172,6 +204,8 @@ exports.getBookingById = async (req, res, next) => {
     if (!booking) {
       throw new NotFoundError(`Booking not found with ID of ${req.params.id}`);
     }
+
+    assertOwnerOrAdmin(req, booking.user._id || booking.user);
 
     res.status(200).json({
       success: true,
@@ -184,7 +218,7 @@ exports.getBookingById = async (req, res, next) => {
 
 // @desc    Cancel a booking
 // @route   PUT /api/bookings/:id/cancel
-// @access  Public (Will protect in Week 6)
+// @access  Private (owner or admin)
 exports.cancelBooking = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -192,6 +226,8 @@ exports.cancelBooking = async (req, res, next) => {
     if (!booking) {
       throw new NotFoundError(`Booking not found with ID of ${req.params.id}`);
     }
+
+    assertOwnerOrAdmin(req, booking.user);
 
     if (booking.status === 'cancelled') {
       throw new ValidationError('Booking is already cancelled');
