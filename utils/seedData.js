@@ -19,6 +19,8 @@ const seedData = async () => {
     await User.deleteMany();
     await Booking.deleteMany();
     await Payment.deleteMany();
+    const EmailLog = require('../models/EmailLog');
+    await EmailLog.deleteMany();
     console.log('Cleaned up previous records successfully.');
 
     // Seed Users

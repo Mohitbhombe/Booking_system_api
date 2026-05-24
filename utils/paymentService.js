@@ -2,6 +2,7 @@ const stripe = require('../config/stripe');
 const Payment = require('../models/Payment');
 const Booking = require('../models/Booking');
 const { ValidationError, NotFoundError, ConflictError } = require('./errors');
+const { sendPaymentReceiptEmail } = require('./emailService');
 
 /**
  * Convert dollar amount to Stripe cents (integer).
@@ -96,6 +97,10 @@ const handlePaymentSuccess = async (paymentIntent) => {
     booking.status = 'confirmed';
     await booking.save();
   }
+
+  sendPaymentReceiptEmail(payment.booking, payment).catch((err) =>
+    console.error('Failed to queue payment receipt email:', err.message)
+  );
 };
 
 /**

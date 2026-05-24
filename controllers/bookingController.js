@@ -10,6 +10,7 @@ const {
   calculateTotalPrice
 } = require('../utils/roomAvailability');
 const { processRefundForBooking } = require('../utils/paymentService');
+const { sendBookingConfirmationEmail, sendCancellationEmail } = require('../utils/emailService');
 
 /**
  * Core booking creation logic. Uses an optional MongoDB session when
@@ -124,6 +125,10 @@ exports.createBooking = async (req, res, next) => {
       success: true,
       data: populatedBooking
     });
+
+    sendBookingConfirmationEmail(populatedBooking).catch((err) =>
+      console.error('Failed to queue booking confirmation email:', err.message)
+    );
   } catch (error) {
     next(error);
   }
@@ -223,6 +228,13 @@ exports.cancelBooking = async (req, res, next) => {
         : null,
       data: populatedBooking
     });
+
+    sendCancellationEmail(
+      populatedBooking,
+      refundResult
+        ? { amount: refundResult.refund.amount / 100, status: refundResult.refund.status }
+        : null
+    ).catch((err) => console.error('Failed to queue cancellation email:', err.message));
   } catch (error) {
     next(error);
   }

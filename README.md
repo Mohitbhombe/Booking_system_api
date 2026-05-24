@@ -4,40 +4,30 @@ Welcome to the Hotel Booking System API development repository. This is a modula
 
 ---
 
-## WEEK 4: Payment Integration using Stripe
+## WEEK 5: Email Notifications with Nodemailer
 
-This week adds Stripe payment processing — payment intents linked to bookings, webhook-driven confirmation, and full/partial refund support on cancellation.
+This week adds automated HTML email notifications — booking confirmations, payment receipts, cancellation notices with refund details, and check-in reminders. Includes an email queue with retry logic and full delivery logging.
 
 ### Folder Structure
 ```text
-/config
-  ├── database.js           # MongoDB connection
-  └── stripe.js             # Stripe SDK initialization
 /controllers
-  ├── hotelController.js
-  ├── roomController.js
-  ├── bookingController.js  # Updated: auto-refund on cancellation
-  └── paymentController.js  # Payment intents, webhooks, refunds
-/middleware
-  └── error.js
+  ├── bookingController.js  # Triggers confirmation & cancellation emails
+  ├── paymentController.js
+  └── emailController.js    # Email log viewing & manual reminder trigger
 /models
-  ├── Hotel.js
-  ├── Room.js
-  ├── User.js
   ├── Booking.js
-  └── Payment.js            # Payment records linked to bookings
+  ├── Payment.js
+  └── EmailLog.js           # Tracks all sent/queued/failed emails
 /routes
-  ├── hotelRoutes.js
-  ├── roomRoutes.js
-  ├── bookingRoutes.js
-  └── paymentRoutes.js
+  └── emailRoutes.js        # /api/emails/logs, /api/emails/send-reminders
 /utils
-  ├── seedData.js
-  ├── errors.js
-  ├── roomAvailability.js
-  └── paymentService.js     # Refund logic and webhook handlers
-.env.example                # Environment variable template
-server.js
+  ├── emailService.js       # Nodemailer transport & send helpers
+  ├── emailTemplates.js     # Professional HTML email templates
+  ├── emailQueue.js         # In-memory queue with 3-retry logic
+  ├── paymentService.js     # Triggers payment receipt email on success
+  └── reminderScheduler.js  # Daily cron: reminders 1 day before check-in
+.env.example
+server.js                   # Starts reminder scheduler on boot
 ```
 
 ---
@@ -45,9 +35,8 @@ server.js
 ## Setup Instructions
 
 ### 1. Prerequisites
-- [Node.js](https://nodejs.org/) (v16+)
-- [MongoDB](https://www.mongodb.com/) (local or Atlas)
-- [Stripe account](https://dashboard.stripe.com/register) (free test mode)
+- Node.js (v16+), MongoDB, Stripe account (Week 4)
+- Gmail account with [App Password](https://support.google.com/accounts/answer/185833) enabled, or SendGrid/SMTP provider
 
 ### 2. Installation
 ```bash
@@ -60,19 +49,20 @@ Copy `.env.example` to `.env` and configure:
 PORT=5000
 MONGODB_URI=mongodb://localhost:27017/hotel_booking
 
-# Get test keys from https://dashboard.stripe.com/test/apikeys
+# Stripe
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Email (Gmail example)
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_SECURE=false
+EMAIL_USER=your@gmail.com
+EMAIL_PASS=your_gmail_app_password
+EMAIL_FROM=Hotel Booking <your@gmail.com>
 ```
 
-### 4. Stripe Webhook (Local Development)
-Use the [Stripe CLI](https://stripe.com/docs/stripe-cli) to forward webhook events:
-```bash
-stripe listen --forward-to localhost:5000/api/payments/webhook
-```
-Copy the webhook signing secret (`whsec_...`) into your `.env` as `STRIPE_WEBHOOK_SECRET`.
-
-### 5. Seed & Run
+### 4. Seed & Run
 ```bash
 npm run seed
 npm run dev
@@ -80,114 +70,89 @@ npm run dev
 
 ---
 
-## Payment Flow
+## Email Triggers
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API
-    participant Stripe
-    participant DB
+| Event | Email Type | When Sent |
+|-------|-----------|-----------|
+| Booking created | `booking_confirmation` | Immediately after `POST /api/bookings` |
+| Payment succeeded | `payment_receipt` | After Stripe webhook or manual confirm |
+| Booking cancelled | `cancellation` | After `PUT /api/bookings/:id/cancel` (includes refund info) |
+| Check-in tomorrow | `check_in_reminder` | Daily cron at 9:00 AM for confirmed bookings |
 
-    Client->>API: POST /api/bookings
-    API->>DB: Create booking (status: pending)
+---
 
-    Client->>API: POST /api/payments/create-intent
-    API->>Stripe: Create PaymentIntent
-    API->>DB: Create payment (status: pending)
-    API-->>Client: clientSecret
+## Email Templates
 
-    Client->>Stripe: Confirm payment (Stripe.js)
-    Stripe->>API: POST /api/payments/webhook
-    API->>DB: Update payment (succeeded)
-    API->>DB: Update booking (confirmed)
-```
+All templates are responsive HTML with a consistent branded layout:
+
+- **Booking Confirmation** — Pending booking details, prompts user to complete payment
+- **Payment Receipt** — Amount paid, transaction ID, confirmed booking details
+- **Cancellation** — Cancelled booking details + refund amount/status if applicable
+- **Check-in Reminder** — Hotel address, check-in time, booking summary
+
+---
+
+## Email Queue & Logging
+
+### Queue (`utils/emailQueue.js`)
+- Emails are queued asynchronously so API responses are not blocked
+- Failed sends are retried up to **3 times** with exponential backoff (5s, 10s, 15s)
+
+### Email Log Model
+| Field | Description |
+|-------|-------------|
+| `to` | Recipient email |
+| `subject` | Email subject line |
+| `type` | `booking_confirmation`, `payment_receipt`, `cancellation`, `check_in_reminder` |
+| `booking` | Linked booking ID |
+| `status` | `queued`, `sent`, `failed` |
+| `attempts` | Number of send attempts |
+| `errorMessage` | Error details if failed |
+| `sentAt` | Timestamp when successfully delivered |
 
 ---
 
 ## API Endpoints
 
-### Payment Operations
+### Email Operations
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/payments/create-intent` | Create Stripe PaymentIntent for a booking |
-| `POST` | `/api/payments/webhook` | Stripe webhook (raw body, not for direct use) |
-| `GET` | `/api/payments/:id` | Get payment details by ID |
-| `GET` | `/api/payments/booking/:bookingId` | Get payment for a booking |
-| `POST` | `/api/payments/:id/refund` | Process full or partial refund |
-| `POST` | `/api/payments/:id/confirm` | Manual confirm (dev only, no webhook needed) |
+| `GET` | `/api/emails/logs` | List all email logs (filter: `?type=`, `?status=`, `?booking=`) |
+| `GET` | `/api/emails/logs/:id` | Get single email log |
+| `POST` | `/api/emails/send-reminders` | Manually trigger tomorrow's reminders (dev only) |
 
-#### Create Payment Intent
-```json
-POST /api/payments/create-intent
-{
-  "bookingId": "<bookingId>"
-}
-```
-Response:
-```json
-{
-  "success": true,
-  "data": {
-    "paymentId": "...",
-    "clientSecret": "pi_xxx_secret_xxx",
-    "amount": 1155,
-    "currency": "usd"
-  }
-}
-```
+### Payment Operations (Week 4)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/payments/create-intent` | Create Stripe PaymentIntent |
+| `POST` | `/api/payments/webhook` | Stripe webhook handler |
+| `GET` | `/api/payments/:id` | Get payment details |
+| `POST` | `/api/payments/:id/refund` | Full or partial refund |
+| `POST` | `/api/payments/:id/confirm` | Manual confirm (dev only) |
 
-#### Refund Payment (Partial)
-```json
-POST /api/payments/:id/refund
-{
-  "amount": 500
-}
-```
-Omit `amount` for a full refund. If the booking isn't already cancelled, a full refund also cancels it.
-
-### Booking Operations (Updated)
-- **`PUT /api/bookings/:id/cancel`** — Cancels booking and automatically refunds any successful payment.
-
-### All Previous Endpoints
-See Week 3 sections below for hotel, room, and booking endpoints.
+### Booking Operations (Week 3)
+- `POST /api/bookings` — Create booking (triggers confirmation email)
+- `GET /api/bookings/user/:userId` — User's bookings
+- `PUT /api/bookings/:id/cancel` — Cancel + refund + cancellation email
+- `GET /api/rooms/:roomId/availability` — Check availability
 
 ---
 
-## Payment Model
+## Testing Emails Locally
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `booking` | ObjectId → Booking | Linked booking |
-| `amount` | Number | Amount in USD |
-| `stripePaymentId` | String | Stripe PaymentIntent ID |
-| `status` | String | `pending`, `succeeded`, `failed`, `refunded`, `partially_refunded` |
-| `paymentMethod` | String | e.g. `card` |
-| `refundedAmount` | Number | Total amount refunded so far |
-| `stripeRefundId` | String | Latest Stripe refund ID |
+1. Configure Gmail App Password in `.env`
+2. Create a booking — check logs: `GET /api/emails/logs`
+3. Confirm payment: `POST /api/payments/:id/confirm` — triggers receipt email
+4. Cancel booking: `PUT /api/bookings/:id/cancel` — triggers cancellation email
+5. Test reminders: `POST /api/emails/send-reminders` (requires confirmed booking checking in tomorrow)
 
----
-
-## Webhook Events Handled
-
-| Event | Action |
-|-------|--------|
-| `payment_intent.succeeded` | Mark payment succeeded, confirm booking |
-| `payment_intent.payment_failed` | Mark payment failed |
-
----
-
-## Testing Without Frontend
-
-1. Create a booking: `POST /api/bookings`
-2. Create payment intent: `POST /api/payments/create-intent`
-3. **Option A** — Use Stripe test card `4242 4242 4242 4242` via Stripe.js / Stripe CLI
-4. **Option B (dev)** — Skip Stripe checkout and call `POST /api/payments/:paymentId/confirm` to simulate webhook confirmation locally
+If email is not configured, emails are logged as `failed` with a helpful error message — the API still works normally.
 
 ---
 
 ## Previous Weeks
 
-- **Week 1**: Environment setup, MongoDB connection, Hotel CRUD API
-- **Week 2**: Room & User models, advanced queries, database seeding
-- **Week 3**: Booking management, availability checks, custom error handling
+- **Week 1**: Environment setup, Hotel CRUD API
+- **Week 2**: Room & User models, advanced queries, seeding
+- **Week 3**: Booking management, availability checks, error handling
+- **Week 4**: Stripe payment integration, webhooks, refunds
