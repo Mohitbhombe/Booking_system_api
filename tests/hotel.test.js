@@ -15,12 +15,21 @@ describe('Hotel endpoints', () => {
       { _id: '2', name: 'Test Hotel B', city: 'CityB' }
     ];
 
-    Hotel.find.mockReturnValueOnce({
-      getFilter: () => ({}),
-      skip: () => ({ limit: () => mockHotels }),
-      limit: () => mockHotels,
-      sort: () => ({ skip: () => ({ limit: () => mockHotels }) })
-    });
+    const makeQuery = (result = []) => {
+      const q = {
+        getFilter: () => ({}),
+        find: () => q,
+        select: () => q,
+        sort: () => q,
+        skip: () => q,
+        limit: () => q,
+        then: (resolve) => resolve(result),
+        catch: () => q
+      };
+      return q;
+    };
+
+    Hotel.find.mockReturnValueOnce(makeQuery(mockHotels));
 
     Hotel.countDocuments.mockResolvedValueOnce(2);
 

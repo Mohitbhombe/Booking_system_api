@@ -39,12 +39,9 @@ describe('Auth endpoints', () => {
       matchPassword: jest.fn().mockResolvedValue(true)
     };
 
-    User.findOne.mockResolvedValueOnce({ ...mockUser, select: () => mockUser });
-    // When controller calls .select('+password'), our mock should return the mockUser
-    User.findOne.mockResolvedValueOnce(mockUser);
-
-    // Ensure findOne used in login returns mockUser
-    User.findOne.mockResolvedValue(mockUser);
+    // For the register test this file-level mock is reset after each test.
+    // For the login test, make findOne return an object with .select that resolves to the user.
+    User.findOne.mockReturnValue({ select: () => Promise.resolve(mockUser) });
 
     const res = await request(app).post('/api/v1/auth/login').send(payload).expect(200);
 

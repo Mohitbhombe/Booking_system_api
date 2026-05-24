@@ -36,6 +36,10 @@ CORS_ORIGINS=https://myapp.example.com,http://localhost:3000
 - Set `NODE_ENV=production` and provide environment variables: `PORT`, `MONGODB_URI`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, email config, and `JWT_SECRET`.
 - On platforms like Railway/Render, set environment vars in the project settings.
 - Ensure the `CLIENT_URL` env var is set for password reset links.
+- For automated GitHub deployment to Render, configure repository secrets:
+  - `RENDER_API_KEY`
+  - `RENDER_SERVICE_ID`
+- The workflow `.github/workflows/deploy.yml` runs tests and triggers a Render deploy on push to `main`.
 
 ## Next steps
 
