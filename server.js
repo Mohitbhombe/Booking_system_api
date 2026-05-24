@@ -32,8 +32,24 @@ const app = express();
 // Enable extended query string parsing (brackets notation)
 app.set('query parser', 'extended');
 
-// Middleware
-app.use(cors());
+// Trust proxy headers in production deployments behind a reverse proxy
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
+// CORS configuration
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CLIENT_URL || 'http://localhost:3000').split(',').map(origin => origin.trim());
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS policy does not allow access from origin ${origin}`));
+  },
+  credentials: true
+}));
 
 // Security headers
 app.use(helmet());

@@ -27,6 +27,12 @@ npm start
 
 ## Deployment notes
 
+Implement production CORS by setting `CORS_ORIGINS` to a comma-separated list of allowed domains, for example:
+
+```bash
+CORS_ORIGINS=https://myapp.example.com,http://localhost:3000
+```
+
 - Set `NODE_ENV=production` and provide environment variables: `PORT`, `MONGODB_URI`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, email config, and `JWT_SECRET`.
 - On platforms like Railway/Render, set environment vars in the project settings.
 - Ensure the `CLIENT_URL` env var is set for password reset links.
