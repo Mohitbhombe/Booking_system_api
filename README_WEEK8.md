@@ -39,7 +39,7 @@ CORS_ORIGINS=https://myapp.example.com,http://localhost:3000
 - For automated GitHub deployment to Render, configure repository secrets:
   - `RENDER_API_KEY`
   - `RENDER_SERVICE_ID`
-- The workflow `.github/workflows/deploy.yml` runs tests and triggers a Render deploy on push to `main`.
+- The workflow `.github/workflows/deploy.yml` runs tests and triggers a Render deploy on push to `week-1`.
 - A `render.yaml` file has been added to support Render service configuration.
 
 ## Next steps
