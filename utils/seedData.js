@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Hotel = require('../models/Hotel');
 const Room = require('../models/Room');
 const User = require('../models/User');
+const Booking = require('../models/Booking');
 
 const seedData = async () => {
   try {
@@ -15,6 +16,7 @@ const seedData = async () => {
     await Hotel.deleteMany();
     await Room.deleteMany();
     await User.deleteMany();
+    await Booking.deleteMany();
     console.log('Cleaned up previous records successfully.');
 
     // Seed Users
@@ -134,6 +136,44 @@ const seedData = async () => {
 
     const rooms = await Room.create(roomSeeds);
     console.log(`Successfully seeded ${rooms.length} Rooms.`);
+
+    // Seed a sample booking for the guest user
+    console.log('Seeding Bookings...');
+    const guestUser = users[0];
+    const sampleRoom = rooms[0];
+    const sampleHotel = hotels[0];
+
+    const checkIn = new Date();
+    checkIn.setDate(checkIn.getDate() + 7);
+    checkIn.setUTCHours(0, 0, 0, 0);
+
+    const checkOut = new Date(checkIn);
+    checkOut.setDate(checkOut.getDate() + 3);
+
+    const nights = 3;
+    const totalPrice = Math.round(sampleRoom.pricePerNight * nights * 100) / 100;
+
+    const booking = await Booking.create({
+      user: guestUser._id,
+      hotel: sampleHotel._id,
+      room: sampleRoom._id,
+      checkInDate: checkIn,
+      checkOutDate: checkOut,
+      totalPrice,
+      status: 'confirmed',
+      guestDetails: {
+        name: guestUser.name,
+        email: guestUser.email,
+        phone: guestUser.phone,
+        guestCount: 1
+      }
+    });
+
+    await User.findByIdAndUpdate(guestUser._id, {
+      $push: { bookings: booking._id }
+    });
+
+    console.log('Successfully seeded 1 sample Booking.');
 
     console.log('Database Seeding finished successfully!');
     process.exit(0);

@@ -7,6 +7,10 @@ const {
   updateRoom,
   deleteRoom
 } = require('../controllers/roomController');
+const { checkAvailability } = require('../controllers/bookingController');
+
+router.route('/:roomId/availability')
+  .get(checkAvailability);
 
 router.route('/')
   .get(getAllRooms)
