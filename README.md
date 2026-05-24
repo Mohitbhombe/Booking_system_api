@@ -1,30 +1,28 @@
-# Hotel Booking System API - Week 1
+# Hotel Booking System API
 
-Welcome to Week 1 of the Hotel Booking System API. This week lays the groundwork by establishing the development environment, configuring database connection logic, creating an initial Hotel Mongoose model, and setting up basic Hotel CRUD (Create, Read, Update, Delete) routes.
-
-## Tech Stack (Week 1)
-- **Runtime**: Node.js
-- **Framework**: Express.js
-- **Database**: MongoDB with Mongoose ODM
-- **Environment**: Dotenv
-- **Process Manager**: Nodemon (Development)
+Welcome to the Hotel Booking System API development repository. This is a modular, production-ready backend project built on a systematic weekly progression.
 
 ---
 
-## Folder Structure
+## WEEK 6: Authentication and Authorization
+
+This week implements JWT-based authentication, role-based access control (RBAC), password hashing, and protected routes across the entire API.
+
+### Folder Structure
 ```text
-/config
-  └── database.js      # MongoDB database connection configuration
 /controllers
-  └── hotelController.js # Logic for CRUD operations on Hotel resources
+  └── authController.js     # Register, login, logout, profile, password reset
+/middleware
+  ├── auth.js               # JWT verification (protect)
+  └── authorize.js          # Role-based access control
 /models
-  └── Hotel.js         # Mongoose schema and model definition for Hotels
+  └── User.js               # Password hashing, reset token fields
 /routes
-  └── hotelRoutes.js   # Route-to-controller mapping for /api/hotels
-.env                   # Local environment variable configuration
-.gitignore             # Excludes sensitive and temp files from git
-package.json           # Project dependencies and script runner configurations
-server.js              # Core entrypoint file of the application
+  └── authRoutes.js         # /api/auth/*
+/utils
+  ├── generateToken.js      # JWT signing
+  ├── passwordValidator.js  # Password strength rules
+  └── tokenBlacklist.js     # Logout token invalidation
 ```
 
 ---
@@ -32,76 +30,135 @@ server.js              # Core entrypoint file of the application
 ## Setup Instructions
 
 ### 1. Prerequisites
-- Ensure you have [Node.js](https://nodejs.org/) installed (v16+ recommended).
-- A running instance of MongoDB (either local installation or a MongoDB Atlas cluster).
+- Node.js (v16+), MongoDB
+- Completed Weeks 1–5 (Stripe, email optional)
 
-### 2. Install Dependencies
-Run the following command to download and install required npm packages:
+### 2. Installation
 ```bash
 npm install
 ```
 
-### 3. Environment Variables Configuration
-Configure a `.env` file in the root directory (a default has been created for you).
+### 3. Environment Setup
 ```env
 PORT=5000
 MONGODB_URI=mongodb://localhost:27017/hotel_booking
+
+# JWT (required for Week 6)
+JWT_SECRET=your_super_secret_jwt_key_change_in_production
+JWT_EXPIRE=30d
+CLIENT_URL=http://localhost:3000
+
+# Stripe, Email (from previous weeks)
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+EMAIL_HOST=smtp.gmail.com
+EMAIL_USER=your@gmail.com
+EMAIL_PASS=your_app_password
 ```
-*Note: Adjust `MONGODB_URI` if using MongoDB Atlas.*
 
-### 4. Running the Server
-
-#### Development Mode (with hot-reloading)
+### 4. Seed & Run
 ```bash
+npm run seed
 npm run dev
 ```
 
-#### Production Mode
+**Seeded test accounts:**
+| Email | Password | Role |
+|-------|----------|------|
+| `john@example.com` | `Password123` | guest |
+| `admin@example.com` | `AdminPass1` | admin |
+
+---
+
+## Authentication Endpoints
+
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| `POST` | `/api/auth/register` | Public | Register new user |
+| `POST` | `/api/auth/login` | Public | Login, returns JWT |
+| `POST` | `/api/auth/logout` | Private | Blacklist current token |
+| `GET` | `/api/auth/profile` | Private | Get logged-in user profile |
+| `PUT` | `/api/auth/update-password` | Private | Change password while logged in |
+| `POST` | `/api/auth/forgot-password` | Public | Send password reset email |
+| `PUT` | `/api/auth/reset-password/:token` | Public | Reset password with token |
+
+### Register / Login Example
+```json
+POST /api/auth/login
+{
+  "email": "john@example.com",
+  "password": "Password123"
+}
+```
+Response includes a `token` — include it in all protected requests:
+```
+Authorization: Bearer <token>
+```
+
+### Password Requirements
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one number
+
+---
+
+## Role-Based Access Control
+
+### Public Routes (no token required)
+| Resource | Routes |
+|----------|--------|
+| System | `GET /api/health` |
+| Auth | `POST /api/auth/register`, `/login`, `/forgot-password`, `/reset-password/:token` |
+| Hotels | `GET /api/hotels`, `GET /api/hotels/:id` |
+| Rooms | `GET /api/rooms`, `GET /api/rooms/:id`, `GET /api/rooms/:roomId/availability` |
+| Stripe | `POST /api/payments/webhook` |
+
+### Guest Routes (authenticated)
+| Resource | Routes |
+|----------|--------|
+| Bookings | `POST /api/bookings`, `GET /api/bookings/me`, `GET /api/bookings/:id`, `PUT /api/bookings/:id/cancel` |
+| Payments | `POST /api/payments/create-intent`, `GET /api/payments/:id`, `GET /api/payments/booking/:bookingId` |
+| Profile | `GET /api/auth/profile`, `PUT /api/auth/update-password`, `POST /api/auth/logout` |
+
+### Admin-Only Routes
+| Resource | Routes |
+|----------|--------|
+| Hotels | `POST`, `PUT`, `DELETE /api/hotels` |
+| Rooms | `POST`, `PUT`, `DELETE /api/rooms` |
+| Bookings | `PUT /api/bookings/:id/status` |
+| Payments | `POST /api/payments/:id/refund` |
+| Emails | `GET /api/emails/logs`, `POST /api/emails/send-reminders` |
+
+---
+
+## Protected Booking Flow
+
 ```bash
-npm start
+# 1. Login
+POST /api/auth/login  →  save token
+
+# 2. Create booking (user ID taken from token automatically)
+POST /api/bookings
+Authorization: Bearer <token>
+{ "hotel": "...", "room": "...", "checkInDate": "...", "checkOutDate": "...", "guestDetails": {...} }
+
+# 3. View your bookings
+GET /api/bookings/me
+Authorization: Bearer <token>
+
+# 4. Create payment intent
+POST /api/payments/create-intent
+Authorization: Bearer <token>
+{ "bookingId": "..." }
 ```
 
 ---
 
-## API Endpoints (Week 1)
+## Previous Weeks
 
-### Health Check
-- **`GET /api/health`**
-  - Description: Check server & system status.
-  - Response: `200 OK`
-
-### Hotel CRUD
-- **`GET /api/hotels`**
-  - Description: Retrieve list of all hotels.
-  - Response: `200 OK`
-- **`GET /api/hotels/:id`**
-  - Description: Retrieve a single hotel by its unique MongoDB ObjectId.
-  - Response: `200 OK` | `404 Not Found` | `400 Bad Request (Invalid ID)`
-- **`POST /api/hotels`**
-  - Description: Add a new hotel.
-  - Request Body: JSON object representing the Hotel model.
-  - Response: `201 Created` | `400 Bad Request`
-- **`PUT /api/hotels/:id`**
-  - Description: Update properties of an existing hotel by its ID.
-  - Request Body: JSON object with fields to update.
-  - Response: `200 OK` | `404 Not Found` | `400 Bad Request`
-- **`DELETE /api/hotels/:id`**
-  - Description: Remove a hotel by its ID from the database.
-  - Response: `200 OK` | `404 Not Found` | `400 Bad Request`
-
----
-
-## Hotel Model Structure
-The Hotel mongoose schema contains:
-- `name` (String, required)
-- `description` (String, required)
-- `address` (String, required)
-- `city` (String, required)
-- `country` (String, required)
-- `pricePerNight` (Number, required)
-- `amenities` (Array of Strings)
-- `images` (Array of Strings)
-- `rating` (Number, default 0)
-- `totalRooms` (Number, required)
-- `availableRooms` (Number, required)
-- `timestamps` (`createdAt` & `updatedAt` generated automatically)
+- **Week 1**: Environment setup, Hotel CRUD API
+- **Week 2**: Room & User models, advanced queries, seeding
+- **Week 3**: Booking management, availability checks, error handling
+- **Week 4**: Stripe payment integration, webhooks, refunds
+- **Week 5**: Email notifications with Nodemailer, queue, logging
