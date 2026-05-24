@@ -2,11 +2,15 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/database');
+const errorHandler = require('./middleware/error');
 
 // Connect to Database
 connectDB();
 
 const app = express();
+
+// Enable extended query string parsing (brackets notation)
+app.set('query parser', 'extended');
 
 // Middleware
 app.use(cors());
@@ -22,9 +26,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Import and mount hotel routes (will be created in subsequent steps)
+// Import and mount routes
 const hotelRoutes = require('./routes/hotelRoutes');
+const roomRoutes = require('./routes/roomRoutes');
+
 app.use('/api/hotels', hotelRoutes);
+app.use('/api/rooms', roomRoutes);
 
 // 404 Route handler
 app.use((req, res, next) => {
@@ -34,14 +41,8 @@ app.use((req, res, next) => {
   });
 });
 
-// Global Error Handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(err.status || 500).json({
-    status: 'error',
-    message: err.message || 'Internal Server Error'
-  });
-});
+// Centralized Error Handler Middleware
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {

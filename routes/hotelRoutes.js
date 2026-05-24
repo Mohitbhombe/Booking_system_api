@@ -8,6 +8,10 @@ const {
   deleteHotel
 } = require('../controllers/hotelController');
 
+// Re-route into other resource routers
+const roomRouter = require('./roomRoutes');
+router.use('/:hotelId/rooms', roomRouter);
+
 // Routes mapped to controllers
 router.route('/')
   .get(getAllHotels)
