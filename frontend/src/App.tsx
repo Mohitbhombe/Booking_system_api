@@ -1444,6 +1444,31 @@ function App() {
         )}
       </main>
 
+      <footer className="luxe-footer">
+        <div className="container luxe-footer-content">
+          <div className="luxe-footer-left">
+            <div className="logo-container" style={{ marginBottom: '8px' }}>
+              <span className="logo-text" style={{ fontSize: '20px' }}>LuxeStay</span>
+            </div>
+            <p className="luxe-footer-tag">Book your dream stay at handpicked premium resorts and experience extraordinary hospitality worldwide.</p>
+          </div>
+          <div className="luxe-footer-right">
+            <div className="developer-info">
+              <span>Developed by </span>
+              <a 
+                href="https://www.linkedin.com/in/mohit-bhombe-578235294/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="dev-link"
+              >
+                Mohit Bhombe
+              </a>
+            </div>
+            <p className="copyright-text">© {new Date().getFullYear()} LuxeStay. All rights reserved.</p>
+          </div>
+        </div>
+      </footer>
+
       {/* ================= MODAL: HOTEL ROOMS SELECTION (GUEST) ================= */}
       {selectedHotel && (
         <div className="modal-overlay" onClick={() => setSelectedHotel(null)}>
