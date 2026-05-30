@@ -76,7 +76,28 @@ const executeCreateBooking = async (body, userId, session = null) => {
     throw new ConflictError('Room is already booked for the selected dates');
   }
 
-  const totalPrice = calculateTotalPrice(roomExists.pricePerNight, dateValidation.nights);
+  // Calculate base price
+  let basePrice = calculateTotalPrice(roomExists.pricePerNight, dateValidation.nights);
+
+  // Add selected facilities surcharge
+  const facilityPrices = {
+    'Airport Shuttle': 25,
+    'Breakfast Buffet': 15,
+    'Spa Access': 40,
+    'Late Check-out': 10
+  };
+
+  let extraCost = 0;
+  const selectedFacilities = body.facilities || [];
+  if (Array.isArray(selectedFacilities)) {
+    selectedFacilities.forEach(facility => {
+      if (facilityPrices[facility] !== undefined) {
+        extraCost += facilityPrices[facility];
+      }
+    });
+  }
+
+  const totalPrice = Math.round((basePrice + extraCost) * 100) / 100;
 
   const bookingData = {
     user: userId,
@@ -86,6 +107,7 @@ const executeCreateBooking = async (body, userId, session = null) => {
     checkOutDate,
     totalPrice,
     guestDetails,
+    facilities: selectedFacilities,
     status: 'pending'
   };
 
@@ -373,3 +395,25 @@ exports.checkAvailability = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get all bookings in the system
+// @route   GET /api/bookings
+// @access  Private/Admin
+exports.getAllBookings = async (req, res, next) => {
+  try {
+    const bookings = await Booking.find()
+      .populate('user', 'name email phone')
+      .populate('hotel', 'name city country address')
+      .populate('room', 'roomNumber type pricePerNight capacity')
+      .sort('-createdAt');
+
+    res.status(200).json({
+      success: true,
+      count: bookings.length,
+      data: bookings
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

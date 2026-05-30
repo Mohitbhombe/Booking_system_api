@@ -8,7 +8,8 @@ const {
   getMyBookings,
   getBookingById,
   cancelBooking,
-  updateBookingStatus
+  updateBookingStatus,
+  getAllBookings
 } = require('../controllers/bookingController');
 
 router.use(protect);
@@ -26,7 +27,8 @@ router.route('/:id/status')
   .put(authorize('admin'), updateBookingStatus);
 
 router.route('/')
-  .post(createBooking);
+  .post(createBooking)
+  .get(authorize('admin'), getAllBookings);
 
 router.route('/:id')
   .get(getBookingById);

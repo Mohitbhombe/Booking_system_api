@@ -13,7 +13,15 @@ import {
   AlertCircle, 
   Home, 
   Sparkles, 
-  Bookmark
+  Bookmark,
+  Plus,
+  Trash2,
+  Edit2,
+  Users,
+  Layers,
+  Settings,
+  ChevronRight,
+  Filter
 } from 'lucide-react';
 
 // API Configuration
@@ -62,7 +70,7 @@ interface Room {
 
 interface Booking {
   _id: string;
-  user: string;
+  user: any;
   hotel: Hotel;
   room: Room;
   checkInDate: string;
@@ -75,12 +83,14 @@ interface Booking {
     phone: string;
     guestCount: number;
   };
+  facilities?: string[];
   createdAt: string;
 }
 
 function App() {
   // Navigation & View States
-  const [activeTab, setActiveTab] = useState<'hotels' | 'bookings'>('hotels');
+  const [activeTab, setActiveTab] = useState<'hotels' | 'bookings' | 'admin'>('hotels');
+  const [adminActiveTab, setAdminActiveTab] = useState<'hotels' | 'rooms' | 'bookings'>('hotels');
   
   // Auth States
   const [user, setUser] = useState<User | null>(null);
@@ -96,6 +106,16 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loadingHotels, setLoadingHotels] = useState(false);
   
+  // Search Widget Filters
+  const [searchCheckIn, setSearchCheckIn] = useState('');
+  const [searchCheckOut, setSearchCheckOut] = useState('');
+  const [searchGuests, setSearchGuests] = useState(2);
+  
+  // MakeMyTrip Filter States
+  const [filterPrice, setFilterPrice] = useState<number | null>(null); // null = all, 100 = <100, 200 = 100-200, 300 = >200
+  const [filterRating, setFilterRating] = useState<number | null>(null); // stars & above
+  const [filterAmenity, setFilterAmenity] = useState<string | null>(null); // Specific amenity
+  
   // Hotel Detail Modal States
   const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -109,11 +129,46 @@ function App() {
   const [guestEmail, setGuestEmail] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestCount, setGuestCount] = useState(1);
+  const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [submittingBooking, setSubmittingBooking] = useState(false);
 
   // User Bookings States
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
+
+  // Admin Systems States
+  const [allSystemBookings, setAllSystemBookings] = useState<Booking[]>([]);
+  const [loadingSystemBookings, setLoadingSystemBookings] = useState(false);
+  const [systemBookingsSearch, setSystemBookingsSearch] = useState('');
+
+  // Admin Hotel Add/Edit States
+  const [showHotelModal, setShowHotelModal] = useState(false);
+  const [editingHotel, setEditingHotel] = useState<Hotel | null>(null);
+  const [hotelForm, setHotelForm] = useState({
+    name: '',
+    description: '',
+    address: '',
+    city: '',
+    country: '',
+    pricePerNight: 100,
+    amenities: 'Free Wi-Fi, Swimming Pool, Gym',
+    images: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80',
+    totalRooms: 10,
+    availableRooms: 10
+  });
+
+  // Admin Room Add/Edit States
+  const [showRoomModal, setShowRoomModal] = useState(false);
+  const [adminSelectedHotelId, setAdminSelectedHotelId] = useState('');
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [roomForm, setRoomForm] = useState({
+    roomNumber: '',
+    type: 'Standard',
+    pricePerNight: 80,
+    capacity: 2,
+    amenities: 'AC, Flat Screen TV, Mini Bar',
+    isAvailable: true
+  });
 
   // Global Alerts / Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -135,7 +190,6 @@ function App() {
       }
     } catch (err) {
       console.log('No valid active session');
-      // Token might be expired, clean it up
       localStorage.removeItem('jwt_token');
       delete axios.defaults.headers.common['Authorization'];
       setUser(null);
@@ -188,6 +242,21 @@ function App() {
     }
   };
 
+  // Fetch all system bookings for Admin
+  const fetchSystemBookings = async () => {
+    setLoadingSystemBookings(true);
+    try {
+      const res = await axios.get('/bookings');
+      if (res.data.success) {
+        setAllSystemBookings(res.data.data);
+      }
+    } catch (err: any) {
+      showToast('Failed to retrieve system bookings', 'error');
+    } finally {
+      setLoadingSystemBookings(false);
+    }
+  };
+
   // Trigger search
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
@@ -202,12 +271,22 @@ function App() {
     fetchHotels();
   }, []);
 
-  // Sync bookings tab when clicked
+  // Sync tabs when clicked
   useEffect(() => {
     if (activeTab === 'bookings' && user) {
       fetchBookings();
+    } else if (activeTab === 'admin' && user?.role === 'admin') {
+      fetchHotels();
+      fetchSystemBookings();
     }
   }, [activeTab, user]);
+
+  // Load nested rooms when admin changes selected hotel in room dashboard
+  useEffect(() => {
+    if (adminSelectedHotelId) {
+      fetchRooms(adminSelectedHotelId);
+    }
+  }, [adminSelectedHotelId]);
 
   // Login handler
   const handleLogin = async (e: React.FormEvent) => {
@@ -305,9 +384,11 @@ function App() {
       return;
     }
     setSelectedRoom(room);
+    setSelectedFacilities([]);
     setGuestName(user.name || '');
     setGuestEmail(user.email || '');
     setGuestPhone(user.phone || '');
+    
     // Pre-populate logical check-in check-out dates
     const today = new Date();
     const checkInDate = new Date(today);
@@ -317,6 +398,15 @@ function App() {
     
     setCheckIn(checkInDate.toISOString().split('T')[0]);
     setCheckOut(checkOutDate.toISOString().split('T')[0]);
+  };
+
+  // Facility checking toggler
+  const handleToggleFacility = (facility: string) => {
+    if (selectedFacilities.includes(facility)) {
+      setSelectedFacilities(selectedFacilities.filter(f => f !== facility));
+    } else {
+      setSelectedFacilities([...selectedFacilities, facility]);
+    }
   };
 
   // Handle Booking form submit
@@ -336,7 +426,8 @@ function App() {
           email: guestEmail,
           phone: guestPhone,
           guestCount: guestCount
-        }
+        },
+        facilities: selectedFacilities
       });
       if (res.data.success) {
         showToast('Reservation booked successfully!', 'success');
@@ -358,10 +449,146 @@ function App() {
       const res = await axios.put(`/bookings/${bookingId}/cancel`);
       if (res.data.success) {
         showToast('Reservation cancelled successfully.', 'success');
-        fetchBookings();
+        if (user?.role === 'admin') {
+          fetchSystemBookings();
+        } else {
+          fetchBookings();
+        }
       }
     } catch (err: any) {
       showToast(err.response?.data?.error || 'Cancellation failed', 'error');
+    }
+  };
+
+  // Admin update booking status (confirm / cancel)
+  const handleAdminUpdateStatus = async (bookingId: string, status: string) => {
+    try {
+      const res = await axios.put(`/bookings/${bookingId}/status`, { status });
+      if (res.data.success) {
+        showToast(`Booking marked as ${status} successfully.`, 'success');
+        fetchSystemBookings();
+      }
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Status update failed', 'error');
+    }
+  };
+
+  // Admin Hotels CRUD operations
+  const handleCreateOrUpdateHotel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload = {
+      ...hotelForm,
+      pricePerNight: Number(hotelForm.pricePerNight),
+      totalRooms: Number(hotelForm.totalRooms),
+      availableRooms: Number(hotelForm.availableRooms),
+      amenities: hotelForm.amenities.split(',').map(s => s.trim()).filter(Boolean),
+      images: hotelForm.images.split(',').map(s => s.trim()).filter(Boolean)
+    };
+
+    try {
+      let res;
+      if (editingHotel) {
+        res = await axios.put(`/hotels/${editingHotel._id}`, payload);
+        showToast('Hotel updated successfully!', 'success');
+      } else {
+        res = await axios.post('/hotels', payload);
+        showToast('New hotel registered successfully!', 'success');
+      }
+      if (res.data.success) {
+        setShowHotelModal(false);
+        setEditingHotel(null);
+        fetchHotels();
+      }
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to persist hotel details', 'error');
+    }
+  };
+
+  const handleEditHotelClick = (hotel: Hotel) => {
+    setEditingHotel(hotel);
+    setHotelForm({
+      name: hotel.name,
+      description: hotel.description,
+      address: hotel.address,
+      city: hotel.city,
+      country: hotel.country,
+      pricePerNight: hotel.pricePerNight,
+      amenities: hotel.amenities.join(', '),
+      images: hotel.images.join(', '),
+      totalRooms: hotel.totalRooms,
+      availableRooms: hotel.availableRooms
+    });
+    setShowHotelModal(true);
+  };
+
+  const handleDeleteHotel = async (hotelId: string) => {
+    if (!window.confirm('Are you sure you want to delete this hotel and all its associations?')) return;
+    try {
+      const res = await axios.delete(`/hotels/${hotelId}`);
+      if (res.data.success) {
+        showToast('Hotel deleted successfully.', 'success');
+        fetchHotels();
+      }
+    } catch (err: any) {
+      showToast('Deletion failed.', 'error');
+    }
+  };
+
+  // Admin Rooms CRUD operations
+  const handleCreateOrUpdateRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminSelectedHotelId) return;
+
+    const payload = {
+      ...roomForm,
+      pricePerNight: Number(roomForm.pricePerNight),
+      capacity: Number(roomForm.capacity),
+      amenities: roomForm.amenities.split(',').map(s => s.trim()).filter(Boolean),
+      hotel: adminSelectedHotelId
+    };
+
+    try {
+      let res;
+      if (editingRoom) {
+        res = await axios.put(`/rooms/${editingRoom._id}`, payload);
+        showToast('Room details updated successfully.', 'success');
+      } else {
+        res = await axios.post(`/hotels/${adminSelectedHotelId}/rooms`, payload);
+        showToast('New room registered successfully.', 'success');
+      }
+      if (res.data.success) {
+        setShowRoomModal(false);
+        setEditingRoom(null);
+        fetchRooms(adminSelectedHotelId);
+      }
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Room persistence failed.', 'error');
+    }
+  };
+
+  const handleEditRoomClick = (room: Room) => {
+    setEditingRoom(room);
+    setRoomForm({
+      roomNumber: room.roomNumber,
+      type: room.type,
+      pricePerNight: room.pricePerNight,
+      capacity: room.capacity,
+      amenities: room.amenities.join(', '),
+      isAvailable: room.isAvailable
+    });
+    setShowRoomModal(true);
+  };
+
+  const handleDeleteRoom = async (roomId: string) => {
+    if (!window.confirm('Delete this room accommodation permanently?')) return;
+    try {
+      const res = await axios.delete(`/rooms/${roomId}`);
+      if (res.data.success) {
+        showToast('Room successfully deleted.', 'success');
+        fetchRooms(adminSelectedHotelId);
+      }
+    } catch (err: any) {
+      showToast('Room deletion failed.', 'error');
     }
   };
 
@@ -378,8 +605,57 @@ function App() {
   const calculateTotalPrice = () => {
     const nights = calculateNights();
     if (!selectedRoom) return 0;
-    return nights * selectedRoom.pricePerNight;
+    
+    let base = nights * selectedRoom.pricePerNight;
+    
+    // Facility charges (matching backend prices)
+    let extra = 0;
+    const facilityPrices: Record<string, number> = {
+      'Airport Shuttle': 25,
+      'Breakfast Buffet': 15,
+      'Spa Access': 40,
+      'Late Check-out': 10
+    };
+    
+    selectedFacilities.forEach(facility => {
+      if (facilityPrices[facility] !== undefined) {
+        extra += facilityPrices[facility];
+      }
+    });
+
+    return base + extra;
   };
+
+  // Filtered hotel array for MMT search and filter bar
+  const filteredHotels = hotels.filter(hotel => {
+    // Fuzzy search already handled on backend, but filters can narrow down
+    if (filterPrice) {
+      if (filterPrice === 100 && hotel.pricePerNight >= 100) return false;
+      if (filterPrice === 200 && (hotel.pricePerNight < 100 || hotel.pricePerNight > 200)) return false;
+      if (filterPrice === 300 && hotel.pricePerNight <= 200) return false;
+    }
+
+    if (filterRating) {
+      if (hotel.rating < filterRating) return false;
+    }
+
+    if (filterAmenity) {
+      const hasAmenity = hotel.amenities.some(a => a.toLowerCase().includes(filterAmenity.toLowerCase()));
+      if (!hasAmenity) return false;
+    }
+
+    return true;
+  });
+
+  // Filtered system bookings for admin
+  const filteredSystemBookings = allSystemBookings.filter(b => {
+    if (!systemBookingsSearch) return true;
+    const search = systemBookingsSearch.toLowerCase();
+    const guestName = b.guestDetails?.name?.toLowerCase() || '';
+    const guestEmail = b.guestDetails?.email?.toLowerCase() || '';
+    const hotelName = b.hotel?.name?.toLowerCase() || '';
+    return guestName.includes(search) || guestEmail.includes(search) || hotelName.includes(search);
+  });
 
   return (
     <>
@@ -416,13 +692,28 @@ function App() {
                 My Bookings
               </span>
             )}
+            {user?.role === 'admin' && (
+              <span 
+                className={`nav-link ${activeTab === 'admin' ? 'active' : ''}`}
+                onClick={() => setActiveTab('admin')}
+                style={{ border: '1px solid var(--primary)', color: 'var(--primary)', fontWeight: '700' }}
+              >
+                <Settings size={16} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                Admin Panel
+              </span>
+            )}
 
             {user ? (
               <div className="profile-widget">
                 <div className="profile-avatar">
                   {user.name.charAt(0).toUpperCase()}
                 </div>
-                <span className="profile-name">{user.name}</span>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span className="profile-name">{user.name}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                    {user.role}
+                  </span>
+                </div>
                 <span title="Logout Session" style={{ display: 'inline-flex', cursor: 'pointer' }}>
                   <LogOut 
                     size={16} 
@@ -444,83 +735,274 @@ function App() {
       </header>
 
       {/* Main Container */}
-      <main className="container" style={{ flex: 1 }}>
-        {activeTab === 'hotels' ? (
+      <main className="container" style={{ flex: 1, paddingBottom: '80px' }}>
+        
+        {/* ================= GUEST HOTELS BROWSER ================= */}
+        {activeTab === 'hotels' && (
           <>
-            {/* Hero Banner & Fuzzy Search */}
-            <section className="hero">
-              <span className="hero-tag">Luxurious local getaways await</span>
-              <h1>Find Your Perfect Premium Room</h1>
-              <p>Explore five-star oceanfront resorts, charming boutique hotels, and rustic ski cabins instantly connected with our reservation system.</p>
+            {/* Quick Login / Welcome Banner */}
+            {!user ? (
+              <div className="login-prompt-banner" onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}>
+                <div className="login-prompt-left">
+                  <span className="login-prompt-badge">🔑 DEMO ACCESS AVAILABLE</span>
+                  <span className="login-prompt-text">
+                    You are browsing in <strong>Guest Mode</strong>. Click here to instantly log in using a pre-seeded account and unlock premium hotel bookings!
+                  </span>
+                </div>
+                <button className="login-prompt-btn">Log In Instantly</button>
+              </div>
+            ) : (
+              <div className="welcome-member-banner">
+                <span className="welcome-member-badge">✨ LUXESTAY VIP MEMBER</span>
+                <span className="welcome-member-text">
+                  Welcome back, <strong>{user.name}</strong>! You have authorized member access to secure premium rooms and custom facilities.
+                </span>
+              </div>
+            )}
+
+            {/* MakeMyTrip Styled Hero Section */}
+            <section className="mmt-hero">
+              <span className="mmt-hero-tag">🌟 Premium Local Getaways</span>
+              <h1>Find Your Perfect Luxury Stay</h1>
+              <p>Book premium resorts, boutique rooms, and holiday accommodations with exclusive surcharged facilities.</p>
               
-              <div className="search-container">
-                <div className="search-input-wrapper">
-                  <Search size={20} className="search-icon" />
+              {/* MakeMyTrip horizontal search widget */}
+              <div className="mmt-search-card">
+                <div className="mmt-search-col">
+                  <div className="mmt-label">City, Area or Property</div>
                   <input 
                     type="text" 
-                    placeholder="Search by hotel name, city (e.g. Miami, London, Singapore), or country..." 
-                    className="search-input"
+                    placeholder="Where are you travelling?" 
+                    className="mmt-search-input-box"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
                 </div>
+                <div className="mmt-search-col">
+                  <div className="mmt-label">Check-In</div>
+                  <div className="mmt-search-val-input-wrapper">
+                    <Calendar size={15} color="var(--primary)" />
+                    <input 
+                      type="date" 
+                      className="mmt-search-date-input"
+                      value={searchCheckIn}
+                      onChange={(e) => setSearchCheckIn(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="mmt-search-col">
+                  <div className="mmt-label">Check-Out</div>
+                  <div className="mmt-search-val-input-wrapper">
+                    <Calendar size={15} color="var(--primary)" />
+                    <input 
+                      type="date" 
+                      className="mmt-search-date-input"
+                      value={searchCheckOut}
+                      onChange={(e) => setSearchCheckOut(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="mmt-search-col last-col">
+                  <div className="mmt-label">Rooms & Guests</div>
+                  <div className="mmt-search-val-input-wrapper">
+                    <Users size={15} color="var(--primary)" />
+                    <select 
+                      className="mmt-search-select"
+                      value={searchGuests}
+                      onChange={(e) => setSearchGuests(Number(e.target.value))}
+                    >
+                      <option value={1}>1 Room, 1 Guest</option>
+                      <option value={2}>1 Room, 2 Guests</option>
+                      <option value={3}>1 Room, 3 Guests</option>
+                      <option value={4}>2 Rooms, 4 Guests</option>
+                      <option value={5}>2 Rooms, 5+ Guests</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="mmt-search-btn-wrapper">
+                  <button className="mmt-search-btn" onClick={() => fetchHotels(searchTerm)}>
+                    Search Hotels
+                  </button>
+                </div>
               </div>
             </section>
 
-            {/* Hotel Grid Title */}
+            {/* Horizontal Filter Bar */}
+            <section className="mmt-filter-section">
+              <div className="mmt-filter-group">
+                <span className="mmt-filter-title"><Filter size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} /> Filters:</span>
+                
+                {/* Price Filters */}
+                <button 
+                  className={`mmt-filter-pill ${filterPrice === null ? 'active' : ''}`}
+                  onClick={() => setFilterPrice(null)}
+                >
+                  All Prices
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterPrice === 100 ? 'active' : ''}`}
+                  onClick={() => setFilterPrice(100)}
+                >
+                  &lt; $100 / night
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterPrice === 200 ? 'active' : ''}`}
+                  onClick={() => setFilterPrice(200)}
+                >
+                  $100 - $200
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterPrice === 300 ? 'active' : ''}`}
+                  onClick={() => setFilterPrice(300)}
+                >
+                  &gt; $200 / night
+                </button>
+              </div>
+
+              <div className="mmt-filter-group" style={{ marginLeft: '12px' }}>
+                {/* Star Ratings */}
+                <button 
+                  className={`mmt-filter-pill ${filterRating === null ? 'active' : ''}`}
+                  onClick={() => setFilterRating(null)}
+                >
+                  Any Rating
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterRating === 4 ? 'active' : ''}`}
+                  onClick={() => setFilterRating(4)}
+                >
+                  4★ & above
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterRating === 5 ? 'active' : ''}`}
+                  onClick={() => setFilterRating(5)}
+                >
+                  5★ Premium
+                </button>
+              </div>
+
+              <div className="mmt-filter-group" style={{ marginLeft: '12px' }}>
+                {/* Amenities */}
+                <button 
+                  className={`mmt-filter-pill ${filterAmenity === null ? 'active' : ''}`}
+                  onClick={() => setFilterAmenity(null)}
+                >
+                  Any Amenity
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterAmenity === 'pool' ? 'active' : ''}`}
+                  onClick={() => setFilterAmenity('pool')}
+                >
+                  Pool
+                </button>
+                <button 
+                  className={`mmt-filter-pill ${filterAmenity === 'wi-fi' ? 'active' : ''}`}
+                  onClick={() => setFilterAmenity('wi-fi')}
+                >
+                  Wi-Fi
+                </button>
+              </div>
+            </section>
+
+            {/* List Header */}
             <h2 className="section-title">
-              <span>Our Exclusive Stays</span>
+              <span>Our Exclusive Premium Stays ({filteredHotels.length})</span>
               {loadingHotels && <Loader size={20} className="spinner" style={{ margin: 0 }} />}
             </h2>
 
-            {/* Hotel Cards Grid */}
-            {loadingHotels && hotels.length === 0 ? (
+            {/* Premium MakeMyTrip Hotels Listing */}
+            {loadingHotels && filteredHotels.length === 0 ? (
               <div className="loading-box">
                 <div className="spinner"></div>
-                <p>Retrieving premium resorts...</p>
+                <p>Finding premium MakeMyTrip deals...</p>
               </div>
-            ) : hotels.length === 0 ? (
+            ) : filteredHotels.length === 0 ? (
               <div className="loading-box" style={{ padding: '64px 24px' }}>
                 <AlertCircle size={40} style={{ marginBottom: '16px', color: 'var(--text-muted)' }} />
-                <h3>No hotels found matching your search.</h3>
-                <p>Try searching for other terms like 'Miami', 'London', 'UK' or 'Resort'.</p>
+                <h3>No luxury properties found matching selected filters.</h3>
+                <p>Try resetting filters or searching for other destinations.</p>
               </div>
             ) : (
-              <section className="hotel-grid">
-                {hotels.map((hotel) => (
+              <section style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {filteredHotels.map((hotel) => (
                   <div 
                     key={hotel._id} 
-                    className="hotel-card" 
-                    onClick={() => handleSelectHotel(hotel)}
+                    className="mmt-hotel-card"
                   >
-                    <img 
-                      src={hotel.images[0] || 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80'} 
-                      alt={hotel.name} 
-                      className="hotel-card-image"
-                    />
-                    <div className="hotel-rating-badge">
-                      <Star size={14} fill="#fbbf24" color="#fbbf24" />
-                      <span>{hotel.rating.toFixed(1)}</span>
+                    {/* Image Block */}
+                    <div className="mmt-hotel-img-wrapper">
+                      <img 
+                        src={hotel.images[0] || 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80'} 
+                        alt={hotel.name} 
+                        className="mmt-hotel-img"
+                      />
+                      {hotel.rating >= 4.5 ? (
+                        <span className="mmt-badge premium">Luxe Pick</span>
+                      ) : (
+                        <span className="mmt-badge trending">Best Value</span>
+                      )}
                     </div>
-                    <div className="hotel-card-content">
-                      <div className="hotel-card-location">{hotel.city}, {hotel.country}</div>
-                      <h3 className="hotel-card-title">{hotel.name}</h3>
-                      <p className="hotel-card-desc">{hotel.description}</p>
-                      
-                      <div className="hotel-card-footer">
-                        <div className="hotel-price">
-                          From <span className="hotel-price-num">${hotel.pricePerNight}</span> / night
+
+                    {/* Details Panel */}
+                    <div className="mmt-hotel-details">
+                      <div className="mmt-hotel-header">
+                        <div className="mmt-hotel-stars">
+                          {Array.from({ length: Math.round(hotel.rating || 4) }).map((_, i) => (
+                            <Star key={i} size={14} fill="#fbbf24" color="#fbbf24" />
+                          ))}
                         </div>
-                        <button className="hotel-card-button">View Rooms</button>
+                        <h3 className="mmt-hotel-title">{hotel.name}</h3>
+                        <div className="mmt-hotel-loc">
+                          <MapPin size={14} color="var(--primary)" />
+                          <span>{hotel.address}, {hotel.city}, {hotel.country}</span>
+                        </div>
                       </div>
+
+                      <p className="mmt-hotel-desc">{hotel.description}</p>
+
+                      <div className="mmt-hotel-tagline">
+                        {hotel.amenities.slice(0, 3).map((item, idx) => (
+                          <span key={idx} className="mmt-pill">
+                            {item}
+                          </span>
+                        ))}
+                        <span className="mmt-pill success">Free Cancellation</span>
+                      </div>
+                    </div>
+
+                    {/* MakeMyTrip Price Breakdown & Review */}
+                    <div className="mmt-price-panel">
+                      <div className="mmt-review-row">
+                        <div style={{ textAlign: 'right' }}>
+                          <span className="mmt-rating-text">
+                            {hotel.rating >= 4.5 ? 'Exceptional' : hotel.rating >= 4.0 ? 'Wonderful' : 'Good'}
+                          </span>
+                          <div className="mmt-rating-count">1,248 reviews</div>
+                        </div>
+                        <span className="mmt-rating-score">{hotel.rating ? hotel.rating.toFixed(1) : '4.2'}</span>
+                      </div>
+
+                      <div className="mmt-original-price">${(hotel.pricePerNight * 1.25).toFixed(0)}</div>
+                      <div className="mmt-discount-price">${hotel.pricePerNight}</div>
+                      <span className="mmt-tax-text">+ taxes & service fees</span>
+
+                      <button 
+                        className="mmt-view-rooms-btn"
+                        onClick={() => handleSelectHotel(hotel)}
+                      >
+                        View Rooms <ChevronRight size={14} style={{ verticalAlign: 'middle', marginLeft: '4px' }} />
+                      </button>
                     </div>
                   </div>
                 ))}
               </section>
             )}
           </>
-        ) : (
-          /* Bookings Dashboard view */
+        )}
+
+        {/* ================= GUEST PERSONAL BOOKINGS ================= */}
+        {activeTab === 'bookings' && (
           <section className="bookings-dashboard">
             <h2 className="section-title">My Travel Reservations</h2>
             
@@ -563,9 +1045,25 @@ function App() {
                         </div>
                       </div>
                       
-                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        Reserved under: <strong>{b.guestDetails.name}</strong> • Guests: {b.guestDetails.guestCount}
+                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                        Reserved under: <strong>{b.guestDetails?.name}</strong> • Guests: {b.guestDetails?.guestCount}
                       </div>
+
+                      {/* Display Selected surcharged facilities */}
+                      {b.facilities && b.facilities.length > 0 && (
+                        <div style={{ marginTop: '12px' }}>
+                          <span style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 'bold', color: 'var(--primary)', display: 'block', marginBottom: '4px' }}>
+                            Included Facilities:
+                          </span>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {b.facilities.map((fac, idx) => (
+                              <span key={idx} style={{ fontSize: '11px', background: 'var(--primary-light)', color: 'var(--primary)', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                                ✓ {fac}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="booking-ticket-aside">
@@ -591,9 +1089,362 @@ function App() {
             )}
           </section>
         )}
+
+        {/* ================= ADMIN MANAGEMENT DASHBOARD ================= */}
+        {activeTab === 'admin' && user?.role === 'admin' && (
+          <section className="bookings-dashboard">
+            <h2 className="section-title">
+              <span>LuxeStay System Administrator Panel</span>
+              <span style={{ fontSize: '13px', background: 'var(--primary-light)', color: 'var(--primary)', padding: '6px 12px', borderRadius: '8px', fontWeight: 'bold' }}>
+                ADMIN CONTROL ENVIRONMENT
+              </span>
+            </h2>
+
+            {/* Tabs Bar */}
+            <div className="admin-tab-bar">
+              <div 
+                className={`admin-tab ${adminActiveTab === 'hotels' ? 'active' : ''}`}
+                onClick={() => setAdminActiveTab('hotels')}
+              >
+                <Home size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                Manage Hotels
+              </div>
+              <div 
+                className={`admin-tab ${adminActiveTab === 'rooms' ? 'active' : ''}`}
+                onClick={() => setAdminActiveTab('rooms')}
+              >
+                <Layers size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                Manage Accommodations
+              </div>
+              <div 
+                className={`admin-tab ${adminActiveTab === 'bookings' ? 'active' : ''}`}
+                onClick={() => setAdminActiveTab('bookings')}
+              >
+                <Bookmark size={14} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                System Bookings
+                <span className="admin-badge-count">{filteredSystemBookings.length}</span>
+              </div>
+            </div>
+
+            {/* ================= SUB-PANEL: HOTEL CRUD ================= */}
+            {adminActiveTab === 'hotels' && (
+              <div className="admin-panel">
+                <div className="admin-header-actions">
+                  <h3>Global Properties ({hotels.length})</h3>
+                  <button 
+                    className="admin-btn"
+                    onClick={() => {
+                      setEditingHotel(null);
+                      setHotelForm({
+                        name: '',
+                        description: '',
+                        address: '',
+                        city: '',
+                        country: '',
+                        pricePerNight: 120,
+                        amenities: 'Free Wi-Fi, Swimming Pool, Gym, Room Service',
+                        images: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80',
+                        totalRooms: 10,
+                        availableRooms: 10
+                      });
+                      setShowHotelModal(true);
+                    }}
+                  >
+                    <Plus size={16} /> Add New Hotel
+                  </button>
+                </div>
+
+                <div className="admin-table-container">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Hotel Details</th>
+                        <th>Location</th>
+                        <th>Price/Night</th>
+                        <th>Availability</th>
+                        <th>Amenities</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hotels.map((hotel) => (
+                        <tr key={hotel._id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <img 
+                                src={hotel.images[0] || 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80'} 
+                                alt={hotel.name} 
+                                style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'cover' }}
+                              />
+                              <div>
+                                <strong style={{ color: 'var(--text-primary)' }}>{hotel.name}</strong>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Rating: {hotel.rating.toFixed(1)} ★</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td>{hotel.city}, {hotel.country}</td>
+                          <td><strong style={{ color: 'var(--text-primary)' }}>${hotel.pricePerNight}</strong></td>
+                          <td>{hotel.availableRooms} / {hotel.totalRooms} Rooms</td>
+                          <td>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', maxWidth: '240px' }}>
+                              {hotel.amenities.slice(0, 3).map((a, i) => (
+                                <span key={i} className="mmt-pill">{a}</span>
+                              ))}
+                              {hotel.amenities.length > 3 && <span className="mmt-pill">+{hotel.amenities.length - 3}</span>}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="admin-action-group">
+                              <button className="admin-icon-btn" onClick={() => handleEditHotelClick(hotel)} title="Edit details">
+                                <Edit2 size={16} />
+                              </button>
+                              <button className="admin-icon-btn delete" onClick={() => handleDeleteHotel(hotel._id)} title="Delete properties">
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ================= SUB-PANEL: ROOM CRUD ================= */}
+            {adminActiveTab === 'rooms' && (
+              <div className="admin-panel">
+                <div className="admin-header-actions" style={{ gap: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '14px' }}>Select Hotel:</span>
+                    <select 
+                      className="form-input" 
+                      style={{ width: '280px', margin: 0 }}
+                      value={adminSelectedHotelId}
+                      onChange={(e) => setAdminSelectedHotelId(e.target.value)}
+                    >
+                      <option value="">-- Choose Hotel Property --</option>
+                      {hotels.map(h => (
+                        <option key={h._id} value={h._id}>{h.name} ({h.city})</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {adminSelectedHotelId && (
+                    <button 
+                      className="admin-btn"
+                      onClick={() => {
+                        setEditingRoom(null);
+                        setRoomForm({
+                          roomNumber: '',
+                          type: 'Standard',
+                          pricePerNight: 90,
+                          capacity: 2,
+                          amenities: 'Flat TV, Private Bath, Safe, Wi-Fi',
+                          isAvailable: true
+                        });
+                        setShowRoomModal(true);
+                      }}
+                    >
+                      <Plus size={16} /> Add Room to Hotel
+                    </button>
+                  )}
+                </div>
+
+                {!adminSelectedHotelId ? (
+                  <div className="admin-empty-state" style={{ border: '1px dashed var(--border)', borderRadius: '12px' }}>
+                    <Layers size={40} style={{ marginBottom: '12px' }} />
+                    <h4>Select a hotel above to configure room inventory.</h4>
+                    <p>You can manage availability and rates per individual accommodation unit.</p>
+                  </div>
+                ) : rooms.length === 0 ? (
+                  <div className="admin-empty-state" style={{ border: '1px dashed var(--border)', borderRadius: '12px' }}>
+                    <Layers size={40} style={{ marginBottom: '12px' }} />
+                    <h4>No rooms configured for this hotel yet.</h4>
+                    <p>Click "Add Room to Hotel" above to configure your first guest room!</p>
+                  </div>
+                ) : (
+                  <div className="admin-table-container">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Room Number</th>
+                          <th>Category Type</th>
+                          <th>Capacity</th>
+                          <th>Price / Night</th>
+                          <th>Amenities</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rooms.map((room) => (
+                          <tr key={room._id}>
+                            <td><strong>{room.roomNumber}</strong></td>
+                            <td>{room.type}</td>
+                            <td>👥 {room.capacity} Guests</td>
+                            <td><strong style={{ color: 'var(--text-primary)' }}>${room.pricePerNight}</strong></td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                {room.amenities.map((a, i) => (
+                                  <span key={i} className="mmt-pill">{a}</span>
+                                ))}
+                              </div>
+                            </td>
+                            <td>
+                              <span className={`admin-status-badge ${room.isAvailable ? 'confirmed' : 'cancelled'}`} style={{ fontSize: '10px' }}>
+                                {room.isAvailable ? 'Available' : 'Maintenance'}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="admin-action-group">
+                                <button className="admin-icon-btn" onClick={() => handleEditRoomClick(room)}>
+                                  <Edit2 size={16} />
+                                </button>
+                                <button className="admin-icon-btn delete" onClick={() => handleDeleteRoom(room._id)}>
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ================= SUB-PANEL: BOOKINGS LIST ================= */}
+            {adminActiveTab === 'bookings' && (
+              <div className="admin-panel">
+                <div className="admin-header-actions">
+                  <div className="admin-search-wrapper">
+                    <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input 
+                      type="text" 
+                      placeholder="Search by guest name, email, hotel..." 
+                      className="admin-search-input"
+                      value={systemBookingsSearch}
+                      onChange={(e) => setSystemBookingsSearch(e.target.value)}
+                    />
+                  </div>
+                  <h3>Total System Bookings: {filteredSystemBookings.length}</h3>
+                </div>
+
+                {loadingSystemBookings && filteredSystemBookings.length === 0 ? (
+                  <div className="loading-box">
+                    <div className="spinner"></div>
+                    <p>Retrieving database bookings...</p>
+                  </div>
+                ) : filteredSystemBookings.length === 0 ? (
+                  <div className="admin-empty-state" style={{ border: '1px dashed var(--border)', borderRadius: '12px' }}>
+                    <Bookmark size={40} style={{ marginBottom: '12px' }} />
+                    <h4>No guest registrations match search.</h4>
+                    <p>Active guest bookings will appear here for confirm/cancel actions.</p>
+                  </div>
+                ) : (
+                  <div className="admin-table-container">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Guest Details</th>
+                          <th>Hotel & Room</th>
+                          <th>Dates & Nights</th>
+                          <th>Facilities Included</th>
+                          <th>Total Paid</th>
+                          <th>Status</th>
+                          <th>Change Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredSystemBookings.map((b) => (
+                          <tr key={b._id}>
+                            <td>
+                              <div>
+                                <strong style={{ color: 'var(--text-primary)' }}>{b.guestDetails?.name || 'Guest User'}</strong>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{b.guestDetails?.email}</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{b.guestDetails?.phone}</div>
+                              </div>
+                            </td>
+                            <td>
+                              <div>
+                                <strong style={{ color: 'var(--text-primary)' }}>{b.hotel?.name}</strong>
+                                <div style={{ fontSize: '11px' }}>{b.room?.type} Room (Number {b.room?.roomNumber})</div>
+                              </div>
+                            </td>
+                            <td>
+                              <div>
+                                <span>{new Date(b.checkInDate).toLocaleDateString()} to {new Date(b.checkOutDate).toLocaleDateString()}</span>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+                                  Stay Duration: {(() => {
+                                    const s = new Date(b.checkInDate);
+                                    const e = new Date(b.checkOutDate);
+                                    const d = e.getTime() - s.getTime();
+                                    return d > 0 ? Math.ceil(d / (1000 * 3600 * 24)) : 0;
+                                  })()} Nights
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              {b.facilities && b.facilities.length > 0 ? (
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', maxWidth: '180px' }}>
+                                  {b.facilities.map((fac, idx) => (
+                                    <span key={idx} style={{ fontSize: '10px', background: 'var(--primary-light)', color: 'var(--primary)', padding: '1px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+                                      ✓ {fac}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>None</span>
+                              )}
+                            </td>
+                            <td>
+                              <strong style={{ color: 'var(--text-primary)', fontSize: '14px' }}>${b.totalPrice}</strong>
+                            </td>
+                            <td>
+                              <span className={`admin-status-badge ${b.status}`}>
+                                {b.status}
+                              </span>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                {b.status === 'pending' && (
+                                  <button 
+                                    className="admin-btn" 
+                                    style={{ padding: '4px 8px', fontSize: '11px', background: 'var(--success)' }}
+                                    onClick={() => handleAdminUpdateStatus(b._id, 'confirmed')}
+                                  >
+                                    Confirm
+                                  </button>
+                                )}
+                                {b.status !== 'cancelled' && (
+                                  <button 
+                                    className="admin-btn danger" 
+                                    style={{ padding: '4px 8px', fontSize: '11px' }}
+                                    onClick={() => handleAdminUpdateStatus(b._id, 'cancelled')}
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                                {b.status === 'cancelled' && (
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>Finalised</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
-      {/* Hotel Rooms Modal */}
+      {/* ================= MODAL: HOTEL ROOMS SELECTION (GUEST) ================= */}
       {selectedHotel && (
         <div className="modal-overlay" onClick={() => setSelectedHotel(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '720px' }}>
@@ -662,8 +1513,10 @@ function App() {
                         <button 
                           className="room-book-btn"
                           onClick={() => handleOpenBooking(room)}
+                          disabled={!room.isAvailable}
+                          style={{ opacity: room.isAvailable ? 1 : 0.5, cursor: room.isAvailable ? 'pointer' : 'not-allowed' }}
                         >
-                          Book Stay
+                          {room.isAvailable ? 'Book Stay' : 'Booked Out'}
                         </button>
                       </div>
                     </div>
@@ -675,12 +1528,12 @@ function App() {
         </div>
       )}
 
-      {/* Booking Form Modal */}
+      {/* ================= MODAL: BOOKING FORM (GUEST WITH FACILITIES) ================= */}
       {selectedRoom && selectedHotel && (
         <div className="modal-overlay" onClick={() => setSelectedRoom(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
             <div className="modal-header">
-              <h2 className="modal-title">Confirm Reservation</h2>
+              <h2 className="modal-title">Confirm Reservation Details</h2>
               <button className="modal-close" onClick={() => setSelectedRoom(null)}>
                 <X size={20} />
               </button>
@@ -764,20 +1617,101 @@ function App() {
                 </select>
               </div>
 
+              {/* EXTRA SURCHARGED FACILITIES SELECTIONS */}
+              <div className="facility-title-label">🎒 Optional Upgrade Facilities</div>
+              
+              <div className="facility-selection-grid">
+                <div 
+                  className={`facility-tile ${selectedFacilities.includes('Breakfast Buffet') ? 'selected' : ''}`}
+                  onClick={() => handleToggleFacility('Breakfast Buffet')}
+                >
+                  <input 
+                    type="checkbox" 
+                    checked={selectedFacilities.includes('Breakfast Buffet')}
+                    readOnly
+                    className="facility-tile-checkbox"
+                  />
+                  <div className="facility-tile-info">
+                    <span className="facility-tile-name">🍳 Breakfast Buffet</span>
+                    <span className="facility-tile-price">+$15 / night</span>
+                  </div>
+                </div>
+
+                <div 
+                  className={`facility-tile ${selectedFacilities.includes('Airport Shuttle') ? 'selected' : ''}`}
+                  onClick={() => handleToggleFacility('Airport Shuttle')}
+                >
+                  <input 
+                    type="checkbox" 
+                    checked={selectedFacilities.includes('Airport Shuttle')}
+                    readOnly
+                    className="facility-tile-checkbox"
+                  />
+                  <div className="facility-tile-info">
+                    <span className="facility-tile-name">🚌 Airport Shuttle</span>
+                    <span className="facility-tile-price">+$25 flat rate</span>
+                  </div>
+                </div>
+
+                <div 
+                  className={`facility-tile ${selectedFacilities.includes('Spa Access') ? 'selected' : ''}`}
+                  onClick={() => handleToggleFacility('Spa Access')}
+                >
+                  <input 
+                    type="checkbox" 
+                    checked={selectedFacilities.includes('Spa Access')}
+                    readOnly
+                    className="facility-tile-checkbox"
+                  />
+                  <div className="facility-tile-info">
+                    <span className="facility-tile-name">💆 Ultimate Spa Access</span>
+                    <span className="facility-tile-price">+$40 flat rate</span>
+                  </div>
+                </div>
+
+                <div 
+                  className={`facility-tile ${selectedFacilities.includes('Late Check-out') ? 'selected' : ''}`}
+                  onClick={() => handleToggleFacility('Late Check-out')}
+                >
+                  <input 
+                    type="checkbox" 
+                    checked={selectedFacilities.includes('Late Check-out')}
+                    readOnly
+                    className="facility-tile-checkbox"
+                  />
+                  <div className="facility-tile-info">
+                    <span className="facility-tile-name">⏰ Late Check-out</span>
+                    <span className="facility-tile-price">+$10 flat rate</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Receipt Summary Box */}
               {calculateNights() > 0 && (
                 <div className="booking-summary-box">
-                  <h4 style={{ fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '8px', color: 'var(--text-primary)' }}>Price Summary</h4>
+                  <h4 style={{ fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', marginBottom: '8px', color: 'var(--text-primary)' }}>Price Breakdowns</h4>
                   <div className="booking-summary-row">
-                    <span>Price Per Night</span>
-                    <span>${selectedRoom.pricePerNight}</span>
+                    <span>Base Accommodations</span>
+                    <span>${selectedRoom.pricePerNight} × {calculateNights()} night{calculateNights() > 1 ? 's' : ''}</span>
                   </div>
-                  <div className="booking-summary-row">
-                    <span>Number of Nights</span>
-                    <span>{calculateNights()} night{calculateNights() > 1 ? 's' : ''}</span>
-                  </div>
+                  
+                  {selectedFacilities.map(fac => {
+                    const facilityPrices: Record<string, number> = {
+                      'Breakfast Buffet': 15,
+                      'Airport Shuttle': 25,
+                      'Spa Access': 40,
+                      'Late Check-out': 10
+                    };
+                    return (
+                      <div key={fac} className="booking-summary-row" style={{ color: 'var(--primary)', fontWeight: '500' }}>
+                        <span>↳ Upgrade: {fac}</span>
+                        <span>+${facilityPrices[fac]}</span>
+                      </div>
+                    );
+                  })}
+
                   <div className="booking-summary-row total">
-                    <span>Grand Total</span>
+                    <span>Grand Total Price</span>
                     <span>${calculateTotalPrice()}</span>
                   </div>
                 </div>
@@ -789,14 +1723,231 @@ function App() {
                 disabled={submittingBooking || calculateNights() <= 0}
                 style={{ opacity: calculateNights() <= 0 ? 0.6 : 1 }}
               >
-                {submittingBooking ? 'Reserving...' : 'Confirm & Secure Booking'}
+                {submittingBooking ? 'Securing Deal...' : 'Confirm & Secure Booking'}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Login & Register Modal */}
+      {/* ================= MODAL: ADD / EDIT HOTEL (ADMIN) ================= */}
+      {showHotelModal && (
+        <div className="modal-overlay" onClick={() => setShowHotelModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">{editingHotel ? 'Edit Property Details' : 'Register New Hotel'}</h2>
+              <button className="modal-close" onClick={() => setShowHotelModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <form className="modal-body" onSubmit={handleCreateOrUpdateHotel}>
+              <div className="form-group">
+                <label className="form-label">Hotel Name</label>
+                <input 
+                  type="text" 
+                  required 
+                  className="form-input"
+                  value={hotelForm.name}
+                  onChange={(e) => setHotelForm({ ...hotelForm, name: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea 
+                  required 
+                  className="form-input" 
+                  rows={3} 
+                  style={{ resize: 'vertical' }}
+                  value={hotelForm.description}
+                  onChange={(e) => setHotelForm({ ...hotelForm, description: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Street Address</label>
+                <input 
+                  type="text" 
+                  required 
+                  className="form-input"
+                  value={hotelForm.address}
+                  onChange={(e) => setHotelForm({ ...hotelForm, address: e.target.value })}
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">City</label>
+                  <input 
+                    type="text" 
+                    required 
+                    className="form-input"
+                    value={hotelForm.city}
+                    onChange={(e) => setHotelForm({ ...hotelForm, city: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Country</label>
+                  <input 
+                    type="text" 
+                    required 
+                    className="form-input"
+                    value={hotelForm.country}
+                    onChange={(e) => setHotelForm({ ...hotelForm, country: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Base Rate per Night ($)</label>
+                  <input 
+                    type="number" 
+                    required 
+                    className="form-input"
+                    value={hotelForm.pricePerNight}
+                    onChange={(e) => setHotelForm({ ...hotelForm, pricePerNight: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Total Room Inventory</label>
+                  <input 
+                    type="number" 
+                    required 
+                    className="form-input"
+                    value={hotelForm.totalRooms}
+                    onChange={(e) => setHotelForm({ ...hotelForm, totalRooms: Number(e.target.value), availableRooms: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Amenities (Comma separated)</label>
+                <input 
+                  type="text" 
+                  required 
+                  className="form-input"
+                  placeholder="Wi-Fi, Pool, Gym, Room Service, Spa"
+                  value={hotelForm.amenities}
+                  onChange={(e) => setHotelForm({ ...hotelForm, amenities: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Images URLs (Comma separated)</label>
+                <input 
+                  type="text" 
+                  required 
+                  className="form-input"
+                  placeholder="https://example.com/img1.jpg, https://example.com/img2.jpg"
+                  value={hotelForm.images}
+                  onChange={(e) => setHotelForm({ ...hotelForm, images: e.target.value })}
+                />
+              </div>
+
+              <button type="submit" className="form-submit">
+                {editingHotel ? 'Save Property Changes' : 'Create Hotel Register'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: ADD / EDIT ROOM (ADMIN) ================= */}
+      {showRoomModal && (
+        <div className="modal-overlay" onClick={() => setShowRoomModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">{editingRoom ? 'Edit Room Inventory' : 'Register New Accommodation'}</h2>
+              <button className="modal-close" onClick={() => setShowRoomModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <form className="modal-body" onSubmit={handleCreateOrUpdateRoom}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Room Number</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="e.g. 301, 102B"
+                    className="form-input"
+                    value={roomForm.roomNumber}
+                    onChange={(e) => setRoomForm({ ...roomForm, roomNumber: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Room Type</label>
+                  <select 
+                    className="form-input"
+                    value={roomForm.type}
+                    onChange={(e) => setRoomForm({ ...roomForm, type: e.target.value })}
+                  >
+                    <option value="Standard">Standard</option>
+                    <option value="Deluxe">Deluxe</option>
+                    <option value="Suite">Suite Premium</option>
+                    <option value="Penthouse">Penthouse Luxe</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Nightly Rate ($)</label>
+                  <input 
+                    type="number" 
+                    required 
+                    className="form-input"
+                    value={roomForm.pricePerNight}
+                    onChange={(e) => setRoomForm({ ...roomForm, pricePerNight: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Capacity (Max Guests)</label>
+                  <input 
+                    type="number" 
+                    required 
+                    className="form-input"
+                    value={roomForm.capacity}
+                    onChange={(e) => setRoomForm({ ...roomForm, capacity: Number(e.target.value) })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Room Comforts & Amenities (Comma separated)</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="AC, Minibar, Balcony, Safe, Kitchenette"
+                  className="form-input"
+                  value={roomForm.amenities}
+                  onChange={(e) => setRoomForm({ ...roomForm, amenities: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input 
+                  type="checkbox" 
+                  id="roomAvailableCheck"
+                  checked={roomForm.isAvailable}
+                  onChange={(e) => setRoomForm({ ...roomForm, isAvailable: e.target.checked })}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <label htmlFor="roomAvailableCheck" style={{ fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  Available for Reservation
+                </label>
+              </div>
+
+              <button type="submit" className="form-submit">
+                {editingRoom ? 'Save Accommodations' : 'Register Room Accommodation'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: AUTHENTICATIONS ================= */}
       {showAuthModal && (
         <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>

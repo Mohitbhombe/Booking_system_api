@@ -70,6 +70,10 @@ const BookingSchema = new mongoose.Schema(
     guestDetails: {
       type: GuestDetailsSchema,
       required: [true, 'Please provide guest details']
+    },
+    facilities: {
+      type: [String],
+      default: []
     }
   },
   {
